@@ -24,7 +24,7 @@ via ``driver.execute_script``; if this object does not materialise the script
 falls back to parsing the page’s HTML with BeautifulSoup.
 
 Duplicate listings are removed by keying on the seller name, year and
-mileage.  Finally, the collected data are written to ``bmw_x3_used_2021_2023.csv``.
+mileage.  Finally, the collected data are written to ``subaru_forester_used_2014_plus.csv``.
 
 To run this script you will need the following Python packages:
 
@@ -35,6 +35,10 @@ encounter issues, consider adding random delays, rotating user agents or
 using a proxy.  Always consult the website’s terms of service before
 scraping.
 """
+
+# ── Scraper settings ─────────────────────────────────────────────────────
+MAX_LISTINGS = None       # Max listings per vehicle (None = all)
+LISTING_PAUSE_SECS = 15   # Pause between each listing scrape
 
 import re
 import time
@@ -61,6 +65,7 @@ class VehicleListing:
 
     scrape_number: Optional[int] = None
     scrape_timestamp: Optional[str] = None
+    make: Optional[str] = None
     title: Optional[str] = None
     url: Optional[str] = None
     seller_name: Optional[str] = None
@@ -75,8 +80,10 @@ class VehicleListing:
     city: Optional[str] = None
     province: Optional[str] = None
     is_private_seller: Optional[bool] = None
-    # Fields from `bmw_x3_used_2021_2023.csv`
+    # Fields from `subaru_forester_used_2014_plus.csv`
     has_driver_assistance: Optional[bool] = None
+    has_carplay: Optional[bool] = None
+    has_cruise: Optional[bool] = None
     price_analysis_description: Optional[str] = None
     average_market_price: Optional[int] = None
     price_vs_market: Optional[int] = None
@@ -115,16 +122,23 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
-    # Setting a realistic user‑agent helps to avoid being blocked by the
-    # site’s anti‑bot defences.  Feel free to customise this value.
+    # Anti-detection: hide headless indicators from Incapsula/Imperva bot protection
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    # Setting a realistic user‑agent matching the actual Chrome version
     options.add_argument(
-        "--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/114.0 Safari/537.36"
+        "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
     )
     # Explicitly specify the driver version to match the browser version from the error log.
     # This is a workaround for when webdriver-manager fails to auto-detect the correct version.
     service = Service(ChromeDriverManager(driver_version="130.0.6723.69").install())
     driver = webdriver.Chrome(service=service, options=options)
+    # Hide navigator.webdriver flag that bot detectors check
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    })
     return driver
 
 
@@ -190,6 +204,8 @@ def get_listing_urls(driver: webdriver.Chrome, search_url: str) -> List[str]:
     # Collect listing links
     links: Set[str] = set()
     anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/a/']")
+    if not anchors:
+        print(f"  WARNING: no listing links found (page title: {driver.title})")
     for anchor in anchors:
         href = anchor.get_attribute("href")
         if href and "/a/" in href:
@@ -236,14 +252,17 @@ def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
         title = " ".join(str(part) for part in (year, make, model) if part)
     listing.title = title
 
+    listing.make = hero.get("make") or ad_basic.get("make")
     listing.trim = hero.get("trim") or ad_basic.get("trim")
-    listing.year = hero.get("year") or vehicle.get("year")
+    year_val = hero.get("year") or vehicle.get("year")
+    if year_val is not None:
+        try:
+            listing.year = int(year_val)
+        except (ValueError, TypeError):
+            listing.year = None
     mileage_km = (
-        hero.get("mileage_km")
-        or hero.get("mileageKm")
-        or hero.get("mileage")
-        or vehicle.get("mileage_km")
-        or vehicle.get("mileageKm")
+        hero.get("mileage")
+        or ad_basic.get("odometer")
         or vehicle.get("mileage")
     )
     if mileage_km is not None:
@@ -253,14 +272,9 @@ def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
             listing.mileage_km = int(re.sub(r"[^0-9]", "", str(mileage_km)))
 
     price_val = (
-        hero.get("price_cad")
-        or vehicle.get("price_cad")
+        hero.get("price")
         or ad_basic.get("price")
-        or hero.get("price_str")
-        or hero.get("priceStr")
-        or vehicle.get("price_str")
-        or vehicle.get("priceStr")
-        or ad_basic.get("priceString")
+        or vehicle.get("price")
     )
     if price_val:
         try:
@@ -358,29 +372,34 @@ def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
     listing.price_position = price_analysis.get("currentAskingPricePosition")
     listing.price_evaluation = price_analysis.get("priceEvaluation")
 
-    # Infer has_driver_assistance from description
+    # Infer has_driver_assistance from description (e.g. EyeSight for Subaru)
     desc_text = (listing.description or "").lower()
     listing.has_driver_assistance = (
-        "driving assistant" in desc_text or "assistant de conduite" in desc_text
+        "eyesight" in desc_text or "driving assistant" in desc_text
+        or "assistant de conduite" in desc_text
     )
 
-    # Set model based on trim and description
-    trim_text = (listing.trim or "").lower()
-    desc_text = (listing.description or "").lower()
-    if "30i" in trim_text:
-        listing.model = "30i"
-    elif "40i" in trim_text:
-        listing.model = "40i"
-    elif "30i" in desc_text:
-        listing.model = "30i"
-    elif "40i" in desc_text:
-        listing.model = "40i"
-    elif "30" in trim_text:
-        listing.model = "30i"
-    elif "40" in trim_text:
-        listing.model = "40i"
-    else:
-        listing.model = None
+    # Use structured feature highlights if available
+    highlights = [
+        h.lower() for h in
+        data.get("featureHighlights", {}).get("highlights", [])
+    ]
+
+    # Infer has_carplay from highlights, title, or description
+    title_text = (listing.title or "").lower()
+    listing.has_carplay = (
+        "carplay" in desc_text or "carplay" in title_text
+        or any("carplay" in h for h in highlights)
+    )
+
+    # Infer has_cruise from highlights, title, or description
+    listing.has_cruise = (
+        "cruise control" in desc_text or "cruise" in title_text
+        or any("cruise" in h for h in highlights)
+    )
+
+    # Set model from trim or title
+    listing.model = listing.trim or listing.title
 
     return listing
 
@@ -419,9 +438,11 @@ def extract_listing_details(driver: webdriver.Chrome, url: str) -> VehicleListin
         # Add the URL into the data for completeness
         listing = parse_ngvdp_model(data)
         listing.url = url
+        print("  → extracted via ngVdpModel")
         return listing
     except Exception:
         pass
+    print("  → ngVdpModel unavailable, falling back to BeautifulSoup")
     # Fallback: parse the page source via BeautifulSoup.  This will only
     # capture a subset of fields but ensures the scraper still returns a
     # record.
@@ -451,14 +472,19 @@ def extract_listing_details(driver: webdriver.Chrome, url: str) -> VehicleListin
             if year_match:
                 listing.year = int(year_match.group(1))
     # Price extraction
-    price_tag = soup.find(text=re.compile(r"\$[\d,]+"))
+    price_tag = soup.find(string=re.compile(r"\$[\d,]+"))
     if price_tag:
         price_str = price_tag.strip()
-        listing.price_cad = int(re.sub(r"[^0-9]", "", price_str))
-    # Seller name (e.g., appears repeatedly on the page)
-    seller_match = soup.find(text=re.compile(r"[A-Za-z].*BMW"))
-    if seller_match:
-        listing.seller_name = seller_match.strip()
+        # Only use it if it looks like a plain price string, not JSON
+        if len(price_str) < 30:
+            listing.price_cad = int(re.sub(r"[^0-9]", "", price_str))
+    # Seller name from page title (format: "YEAR MAKE MODEL | $PRICE | KM | ... by DEALER | CITY, PROV")
+    page_title = soup.find("title")
+    if page_title:
+        title_text = page_title.get_text()
+        by_match = re.search(r"for sale by (.+?) \|", title_text)
+        if by_match:
+            listing.seller_name = by_match.group(1).strip()
     return listing
 
 
@@ -489,17 +515,39 @@ def deduplicate_listings(listings: List[VehicleListing]) -> List[VehicleListing]
             unique_listings.append(listing)
     return unique_listings
 
-def main() -> None:
-    """Run the scraper and write results to CSV.
 
-    The search URL is assembled with filters for make (BMW), model (X3), year
-    range (2021–2023), vehicle condition (Used), radius (500 km) and postal
-    code (H1X 3J1).  The ``rcp`` parameter is set to 100 to request the
-    maximum number of results per page, as suggested by the AutoTrader
-    scraping documentation【298376264705576†L224-L233】.  Additional pages
-    (``rcs`` offsets) could be processed in a loop if required.
-    """
-    output_file = "bmw_x3_used_2021_2023.csv"
+# ── Search configurations ────────────────────────────────────────────────
+# Each entry: (make/model URL path, output CSV filename)
+OUTPUT_FILE = "used_suv_listings.csv"
+
+VEHICLES = [
+    "subaru/forester",
+    "toyota/rav4",
+    "mazda/cx-5",
+    "honda/cr-v",
+]
+
+COMMON_PARAMS = (
+    "?rcp=100"          # results per page (max 100)
+    "&rcs=0"            # result offset (0 for first page)
+    "&srt=39"           # sort order
+    "&yRng=2014%2C"     # year 2014+
+    "&pRng="            # no price limit
+    "&prx=100"          # radius in km
+    "&prv=Quebec"       # province
+    "&loc=H1X%203J1"    # postal code
+    "&body=SUV"         # body type
+    "&hprc=True"        # has price
+    "&wcp=True"         # with CarProof
+    "&sts=Used"         # used vehicles only
+    "&inMarket=advancedSearch"
+)
+
+
+
+def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
+                   output_file: str) -> None:
+    """Scrape listings for a single vehicle search and save to CSV."""
     scrape_start_time = datetime.now().isoformat()
     scrape_num = 1
     if os.path.exists(output_file):
@@ -508,49 +556,31 @@ def main() -> None:
             if "scrape_number" in existing_df.columns:
                 scrape_num = int(existing_df["scrape_number"].max()) + 1
         except (pd.errors.EmptyDataError, KeyError, ValueError):
-            # File is empty or doesn't have the column, start with 1
             pass
-    # Build the search URL.  If you wish to narrow the search further you can
-    # modify these parameters; see AutoTrader.ca’s URL structure for
-    # additional options.
-    search_url = (
-        "https://www.autotrader.ca/cars/bmw/x3/"
-        "?fr=2021&to=2023"  # year range
-        "&prx=500"          # radius in km
-        "&loc=H1X%203J1"    # postal code
-        "&prv=Quebec"       # province
-        "&sts=Used"         # used vehicles only
-        "&rcp=100"          # results per page (max 100)
-        "&rcs=0"            # result offset (0 for first page)
-    )
-    driver = create_driver(headless=True)
-    try:
-        print("Collecting listing URLs…")
-        urls = get_listing_urls(driver, search_url)
-        print(f"Found {len(urls)} vehicle URLs")
-        # Limit to 5 for debugging
-        urls_to_process = urls
-        print(f"Processing the first {len(urls_to_process)} listings for debugging...")
-        listings: List[VehicleListing] = []
-        for idx, url in enumerate(urls_to_process, start=1):
-            print(f"Processing {idx}/{len(urls_to_process)}: {url}")
-            try:
-                listing = extract_listing_details(driver, url)
-                listing.scrape_number = scrape_num
-                listing.scrape_timestamp = scrape_start_time
-                listings.append(listing)
-            except Exception as exc:
-                print(f"Failed to process {url}: {exc}")
-                continue
-    finally:
-        driver.quit()
-    # Deduplicate based on seller, year and mileage
+
+    print("Collecting listing URLs...")
+    urls = get_listing_urls(driver, search_url)
+    print(f"Found {len(urls)} vehicle URLs")
+    urls_to_process = urls[:MAX_LISTINGS] if MAX_LISTINGS else urls
+    print(f"Processing {len(urls_to_process)} listings...")
+    listings: List[VehicleListing] = []
+    for idx, url in enumerate(urls_to_process, start=1):
+        print(f"  {idx}/{len(urls_to_process)}: {url}")
+        try:
+            listing = extract_listing_details(driver, url)
+            listing.scrape_number = scrape_num
+            listing.scrape_timestamp = scrape_start_time
+            listings.append(listing)
+        except Exception as exc:
+            print(f"  Failed: {exc}")
+            continue
+        if LISTING_PAUSE_SECS and idx < len(urls_to_process):
+            time.sleep(LISTING_PAUSE_SECS)
+
     unique_listings = deduplicate_listings(listings)
     print(f"Keeping {len(unique_listings)} unique listings after deduplication")
-    # Convert to DataFrame and save to CSV
     df = pd.DataFrame([asdict(l) for l in unique_listings])
 
-    # Reorder columns to have scrape_number and scrape_timestamp first
     if not df.empty:
         cols = df.columns.tolist()
         if "scrape_timestamp" in cols:
@@ -562,6 +592,31 @@ def main() -> None:
     file_exists = os.path.exists(output_file)
     df.to_csv(output_file, mode='a', header=not file_exists, index=False)
     print(f"Data saved to {output_file}")
+
+
+def main() -> None:
+    """Scrape all configured vehicles, one at a time.
+
+    The search URL is assembled with filters for make (BMW), model (X3), year
+    range (2021–2023), vehicle condition (Used), radius (500 km) and postal
+    code (H1X 3J1).  The ``rcp`` parameter is set to 100 to request the
+    maximum number of results per page, as suggested by the AutoTrader
+    scraping documentation【298376264705576†L224-L233】.  Additional pages
+    (``rcs`` offsets) could be processed in a loop if required.
+    """
+    driver = create_driver(headless=True)
+    try:
+        for make_model in VEHICLES:
+            search_url = (
+                f"https://www.autotrader.ca/cars/{make_model}/qc/montr%c3%a9al/"
+                + COMMON_PARAMS
+            )
+            print(f"\n{'='*60}")
+            print(f"Scraping {make_model}")
+            print(f"{'='*60}")
+            scrape_vehicle(driver, search_url, OUTPUT_FILE)
+    finally:
+        driver.quit()
 
 
 if __name__ == "__main__":
