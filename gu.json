@@ -1,0 +1,550 @@
+{
+    "currentCulture": "en",
+    "deepLinkSavedSearch": {
+        "savedSearch": {
+            "id": "1c0b727b-aa78-4bae-81c1-7fe8312efaf1",
+            "query": "/cars/bmw/x3/2024/qc/blainville/?rcp=0&rcs=0&srt=0&prx=100&prv=Quebec&hprc=False&wcp=False&sts=New-Used",
+            "title": " new & used BMW X3 vehicles 2024 for sale  within 100km of Blainville, QC",
+            "isMre": false,
+            "type": 0,
+            "sourceId": 0
+        },
+        "savedSearchCriteria": {
+            "micrositeType": 1,
+            "micrositeCulture": "en-CA",
+            "location": {
+                "latitude": 45.667171,
+                "longitude": -73.870171
+            },
+            "provinceAbbreviation": "QC",
+            "city": "Blainville",
+            "proximity": 100,
+            "adStatus": [
+                1,
+                2
+            ],
+            "adType": [
+                1,
+                2
+            ],
+            "makes": [
+                "BMW"
+            ],
+            "models": [
+                "X3"
+            ],
+            "cpoStatus": 0,
+            "sortBy": 0,
+            "yearRange": {
+                "start": 2024,
+                "end": 2024
+            },
+            "cashDown": 0,
+            "tradeIn": 0,
+            "skip": 0,
+            "top": 0,
+            "searchCriteriaType": 0,
+            "showQaAd": false
+        }
+    },
+    "highlights": {
+        "mileage": "74,250 km",
+        "transmission": "Automatic",
+        "drivetrain": "4x4",
+        "items": [
+            "Navigation System",
+            "Cruise Control",
+            "Satellite Radio",
+            "Power Windows"
+        ]
+    },
+    "gallery": {
+        "items": [
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/87247868-a4a3-4d50-8823-c89d9433ee4f.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/87247868-a4a3-4d50-8823-c89d9433ee4f.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/c8e64123-2b4a-46ec-9f01-5a2a622a3572.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/c8e64123-2b4a-46ec-9f01-5a2a622a3572.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/f3e81626-5d52-4c53-b194-31c548a7782f.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/f3e81626-5d52-4c53-b194-31c548a7782f.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/0f5cc791-3fda-494b-a66a-5ddf7106f235.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/0f5cc791-3fda-494b-a66a-5ddf7106f235.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/cb26deff-304f-4e7b-92d9-53cc02db5eef.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/cb26deff-304f-4e7b-92d9-53cc02db5eef.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/5524cc5b-5c70-4a11-a72e-be761d7a0387.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/5524cc5b-5c70-4a11-a72e-be761d7a0387.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/857aa1be-d097-498e-8fea-c4594cee012f.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/857aa1be-d097-498e-8fea-c4594cee012f.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/05b94b58-a12f-4f2f-99f0-48a7f2f97b4f.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/05b94b58-a12f-4f2f-99f0-48a7f2f97b4f.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/abe726d6-0d38-4883-add1-785adb410e73.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/abe726d6-0d38-4883-add1-785adb410e73.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/1de73184-b4b6-4c15-a296-66d5e34b485b.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/1de73184-b4b6-4c15-a296-66d5e34b485b.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/80a17758-32a5-439d-bd92-b7633c505177.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/80a17758-32a5-439d-bd92-b7633c505177.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/1965a018-ea82-46d5-957e-de3fb7cb2472.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/1965a018-ea82-46d5-957e-de3fb7cb2472.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/59cfc87e-15f4-4342-8932-ad880b85fb5e.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/59cfc87e-15f4-4342-8932-ad880b85fb5e.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/306eaf60-b6d7-46fc-941c-1eb081b43c12.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/306eaf60-b6d7-46fc-941c-1eb081b43c12.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/d269b391-acf6-4707-9fa1-acab9bcd4a72.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/d269b391-acf6-4707-9fa1-acab9bcd4a72.jpg"
+            },
+            {
+                "type": "Photo",
+                "galleryUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/1932bc70-e13d-46d4-95bf-057c39c8abe4.jpg-1024x786",
+                "photoViewerUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/0823/3719/1932bc70-e13d-46d4-95bf-057c39c8abe4.jpg"
+            }
+        ],
+        "foreignId": "66877446",
+        "count": 16
+    },
+    "hero": {
+        "make": "BMW",
+        "model": "X3",
+        "year": "2024",
+        "trim": "M40i xDrive véhicule d'activités sportives",
+        "vin": "5UX83DP0XR9T45812",
+        "price": "61,950",
+        "location": "Blainville",
+        "mileage": "74,250 km",
+        "priceAnalysis": "GoodPrice",
+        "vehicleAge": "",
+        "priceAnalysisDescription": "$2,194 BELOW MARKET",
+        "status": "Used",
+        "stockNumber": "u25-148",
+        "carfax": "ViewCarFaxWithLead",
+        "ssoUserInfo": {
+            "isAuthenticated": false,
+            "isLocalAccount": false
+        }
+    },
+    "adBasicInfo": {
+        "adId": "5_66877446",
+        "adIdUnique": "5_66877446_unknown",
+        "sourceId": "5",
+        "foreignId": "66877446",
+        "isPrivate": false,
+        "isNew": false,
+        "isNpv": false,
+        "isCommercial": false,
+        "make": "BMW",
+        "model": "X3",
+        "year": "2024",
+        "trim": "M40i xDrive véhicule d'activités sportives",
+        "price": "$61,950",
+        "category": "PassengerVehicles",
+        "splashBodyType": "",
+        "microSite": "cars",
+        "showSplashPlus": false,
+        "isMobielRequest": false,
+        "isAmvic": false,
+        "dealerCoId": "5-20080509104031281",
+        "dealerCoForeignId": "20080509104031281",
+        "dealerCoName": "Hamel BMW",
+        "status": "Used",
+        "vin": "5UX83DP0XR9T45812",
+        "stockNumber": "u25-148",
+        "odometer": "74250",
+        "hasUpsellDigitalRetailListing": false,
+        "isFinancePrequalAvailable": false
+    },
+    "ngIcoModel": {
+        "enable": true,
+        "application": "Ico",
+        "adId": "5-66877446",
+        "language": "en-CA",
+        "webApiUrl": "//ico.autotrader.ca/Ico/",
+        "platform": "Desktop",
+        "postalCode": "",
+        "funnel": "TradeIn",
+        "dealerForeignId": "20080509104031281",
+        "dealerName": "Hamel BMW",
+        "icoDemo": false
+    },
+    "conditionAnalysis": {
+        "options": [],
+        "odometerCondition": "High",
+        "odometer": "74,250 KM",
+        "carfax": "ViewCarFaxWithLead"
+    },
+    "similarVehicles": {
+        "vehicles": [
+            {
+                "title": "2019 BMW X3",
+                "price": "$29,950",
+                "odometer": "76,500",
+                "detailPageUrl": "/a/bmw/x3/blainville/quebec/5_67343257_20080509104031281/?lstName=vehicleSpecialistWidget&srtOrd=not%20applicable&lstIdx=1",
+                "imageUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202507/3123/3833/8bbf6e8c-9850-4c98-8587-e0b5191eacf9.jpg-133x100",
+                "category": "PassengerVehicles"
+            },
+            {
+                "title": "2021 BMW X3",
+                "price": "$37,950",
+                "odometer": "65,800",
+                "detailPageUrl": "/a/bmw/x3/blainville/quebec/5_66473581_20080509104031281/?lstName=vehicleSpecialistWidget&srtOrd=not%20applicable&lstIdx=2",
+                "imageUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202505/2023/3931/a30970be-38fa-4513-943f-a6c565e4b310.jpg-133x100",
+                "category": "PassengerVehicles"
+            },
+            {
+                "title": "2022 BMW X3",
+                "price": "$39,450",
+                "odometer": "62,900",
+                "detailPageUrl": "/a/bmw/x3/blainville/quebec/5_65647283_20080509104031281/?lstName=vehicleSpecialistWidget&srtOrd=not%20applicable&lstIdx=3",
+                "imageUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202503/1923/3724/65254310-a147-475e-8616-17a3c2d95a51.jpg-133x100",
+                "category": "PassengerVehicles"
+            },
+            {
+                "title": "2022 BMW X3",
+                "price": "$42,950",
+                "odometer": "72,000",
+                "detailPageUrl": "/a/bmw/x3/blainville/quebec/5_66459346_20080509104031281/?lstName=vehicleSpecialistWidget&srtOrd=not%20applicable&lstIdx=4",
+                "imageUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/import/202505/2023/3931/f07a6769-26ad-4811-87ea-cfdef52959ac.jpg-133x100",
+                "category": "PassengerVehicles"
+            }
+        ],
+        "totalCount": 8,
+        "viewAllUrl": "/cars/bmw/x3/?rcp=0&rcs=0&srt=0&prx=-1&hprc=False&wcp=False&sts=Used-Damaged&cat1=2&cat2=7%2C11%2C10%2C9&inMarket=vehicleSpecialist&st=1&sllk=advancedSearch&cosid=5&cofid=20080509104031281&vsspr=Results",
+        "title": "Similar vehicles from this dealer",
+        "viewAllText": "View All",
+        "showModule": true
+    },
+    "carInsurance": {
+        "application": "Insurance",
+        "adId": "5_66877446",
+        "language": "en",
+        "targetUrl": "",
+        "isStandAlone": false,
+        "platform": "Desktop",
+        "make": "BMW",
+        "model": "X3",
+        "year": "2024",
+        "vin": "5UX83DP0XR9T45812",
+        "combineWithFinance": false,
+        "showWidgetOnTop": true,
+        "widgetClickTagUrl": "https://www.tdinsurance.com/products-services/auto-car-insurance?cid=DFA:32553311:3382921:404114179:222534451&dclid=CM_Tib_zqYkDFWrfGAId72A3cQ",
+        "pillClickTagUrl": "https://www.tdinsurance.com/products-services/auto-car-insurance?cid=DFA:32553311:3382921:404114179:222534451&dclid=CM_Tib_zqYkDFWrfGAId72A3cQ",
+        "widgetImpressionTagUrl": "https://ad.doubleclick.net/ddm/trackimp/N307601.140810AUTOTRADER.CAEN/B32553311.404114179;dc_trk_aid=596341081;dc_trk_cid=222534451;ord=2044979881;dc_lat=;dc_rdid=;tag_for_child_directed_treatment=;tfua=;gdpr=${GDPR};gdpr_consent=${GDPR_CONSENT_755};ltd=;dc_tdv=1?",
+        "pillImpressionTagUrl": "https://ad.doubleclick.net/ddm/trackimp/N307601.140810AUTOTRADER.CAEN/B32553311.404539611;dc_trk_aid=596367273;dc_trk_cid=223081977;ord=1685355596;dc_lat=;dc_rdid=;tag_for_child_directed_treatment=;tfua=;gdpr=${GDPR};gdpr_consent=${GDPR_CONSENT_755};ltd=;dc_tdv=1?",
+        "widgetClickTrackerUrl": "https://ad.doubleclick.net/ddm/trackclk/N307601.140810AUTOTRADER.CAEN/B32553311.404114179;dc_trk_aid=596341081;dc_trk_cid=222534451;dc_lat=;dc_rdid=;tag_for_child_directed_treatment=;tfua=;gdpr=${GDPR};gdpr_consent=${GDPR_CONSENT_755};ltd=;dc_tdv=1",
+        "pillClickTrackerUrl": "https://ad.doubleclick.net/ddm/trackclk/N307601.140810AUTOTRADER.CAEN/B32553311.404539611;dc_trk_aid=596367273;dc_trk_cid=223081977;dc_lat=;dc_rdid=;tag_for_child_directed_treatment=;tfua=;gdpr=${GDPR};gdpr_consent=${GDPR_CONSENT_755};ltd=;dc_tdv=1",
+        "micrositeText": "Car Insurance",
+        "category": "PassengerVehicles"
+    },
+    "securePayment": {
+        "isSecurePaymentAvailable": false,
+        "securePaymentApiUrl": "https://sellmycar.autotrader.ca/SecurePayment/GetBuyNowLink",
+        "securePaymentLandingUrl": "https://sellmycar.autotrader.ca/securepayment/index"
+    },
+    "fuelEconomy": {
+        "showModule": false,
+        "tankSize": 0,
+        "yearlyMileage": 0,
+        "yearlyFuelCost": 0,
+        "showFuelEconomyDisclaimer": false,
+        "dataLayerSectionName": "fuel economy",
+        "order": 160,
+        "navigationAnchorName": "vdp-fueleconomy-widget",
+        "navigationTitle": "Fuel Economy"
+    },
+    "carfax": {
+        "carProofReportUrl": "https://vhr.carfax.ca/?id=MXItdVda1pKClhL0tuDpFX8IdpkZmLoc",
+        "carProofMessage": "",
+        "carFaxMode": 4,
+        "showReportedNoAccidents": false,
+        "showOneOwner": false,
+        "showCarProofWidget": false
+    },
+    "ico": {
+        "showIcoVdp": true,
+        "icoConsumer": {
+            "consumerId": "3cecc76a-9ee1-4c55-a868-e5fc05aabcf5",
+            "firstName": null,
+            "lastName": null,
+            "emailAddress": null,
+            "postalCode": ""
+        },
+        "dealerId": "20080509104031281",
+        "dealerName": "Hamel BMW",
+        "icoThirdPartyProviderIFrameBaseUrl": "https://trader.accu-trade.com/",
+        "icoThirdPartyProvider": 0,
+        "dealerKey": "efb423a08ce5529d87580c04e9d0b383b8573c61",
+        "icoThirdPartyProviderApiBaseUrl": "https://perseus-api-production.accu-trade.com/api/",
+        "icoApiBaseUrl": "//ico.autotrader.ca/Ico/",
+        "adId": "5_66877446",
+        "icoFunnel": 1,
+        "dataLayerSectionName": "ico",
+        "order": 40,
+        "navigationAnchorName": "ico",
+        "navigationTitle": "Instant Cash Offer",
+        "icoDemo": false,
+        "showIcoModal": false
+    },
+    "salesLeadForm": {
+        "testDriveSchedulerVisible": true,
+        "makeAnOfferVisible": true,
+        "tradeInAppraisalVisible": false,
+        "showCannedMsg": true
+    },
+    "featureHighlights": {
+        "showModule": true,
+        "showAllOptions": true,
+        "highlights": [
+            "Navigation System",
+            "Cruise Control",
+            "Satellite Radio",
+            "Power Windows",
+            "Spoiler",
+            "Bluetooth"
+        ],
+        "options": [
+            "Remote Start",
+            "Stability Control",
+            "Auto On/Off Headlamps",
+            "Anti-Lock Brakes (ABS)"
+        ],
+        "extraOption": "Régulateur de Vitesse;Direction Assistée;Système de Freinage Anti-blocage (ABS);Contrôle de Stabilité;Coussin Gonflable Conducteur;Coussins Gonflable Latéraux;Serrures de Sécurité Enfant;Démarreur à Distance;Ouverture à Distance du Coffre;Rétroviseurs Chauffants;Rétroviseurs Électriques;Vitres Électriques;Climatisation Avant;Commandes Audio au Volant;Sièges à Mémoire;Volant Réglable;Aileron Arrière;Vitres Teintées;Différentiel à Glissement Limité;Radio Satellite;Caméra de Recul;Rétroviseurs Escamotables;Volant en Cuir;Phares Automatiques;Contrôle de Climatisation à Deux Zones;Hayon Électrique;Coussins Gonflables Latéraux de Tête;Miroir de Courtoisie Éclairé Conducteur;Système de Navigation (GPS);Accès au Coffre Arrière;Pack Éclairage Ambiant;Démarrage par Bouton-Poussoir;Suspension Réglable;Sièges Avant Chauffants;Surveillance de la Pression des Pneus;Siège Conducteur à Réglage Électrique;Siège Passager Électrique;Intégration Bluetooth;Contrôle Automatique de la Température;Coussin Gonflable Passager;Transmission Automatique - 8 Vitesses;Transmission Automatique;Couvre-Bagage;Contrôle de Climatisation Arrière;Capteur de Présence Passager pour Coussin Gonflabl;Miroir de Courtoisie Éclairé Passager;Pneus Haute Performance;Radio HD;Rétroviseur Intérieur Electrochromatique;Surveillance des Angles Morts;Verrouillage Automatique des Portes;Rétroviseurs avec Clignotants;Climatisation Arrière;Dégivreur de Vitre Arrière;Phares à LED;Rétroviseurs à Mémoire;Transmission à Double Embrayage",
+        "dataLayerSectionName": "features",
+        "order": 150,
+        "navigationAnchorName": "vdp-options-widget",
+        "navigationTitle": "Features &"
+    },
+    "specifications": {
+        "specs": [
+            {
+                "key": "Kilometres",
+                "value": "74,250 km"
+            },
+            {
+                "key": "Status",
+                "value": "Used"
+            },
+            {
+                "key": "Trim",
+                "value": "M40i xDrive véhicule d'activités sportives"
+            },
+            {
+                "key": "Engine",
+                "value": "3.0 L"
+            },
+            {
+                "key": "Cylinder",
+                "value": "6"
+            },
+            {
+                "key": "Transmission",
+                "value": "Automatic"
+            },
+            {
+                "key": "Drivetrain",
+                "value": "4x4"
+            },
+            {
+                "key": "Stock Number",
+                "value": "u25-148"
+            },
+            {
+                "key": "Exterior Colour",
+                "value": "Grey"
+            },
+            {
+                "key": "Interior Colour",
+                "value": "Black"
+            },
+            {
+                "key": "Passengers",
+                "value": "5"
+            },
+            {
+                "key": "Doors",
+                "value": "4"
+            },
+            {
+                "key": "Fuel Type",
+                "value": "Gas"
+            }
+        ],
+        "showMadeIn": false,
+        "dataLayerSectionName": "specs",
+        "order": 110,
+        "navigationAnchorName": "vdp-specs-widget",
+        "navigationTitle": "Specs"
+    },
+    "dealerTrust": {
+        "requestIsFromMobile": false,
+        "dealerCompanyName": "Hamel BMW",
+        "dealerCompanyFormattedName": "Hamel+BMW",
+        "logoUrl": "https://mkt-vehicleimages-prd.autotradercdn.ca/photos/201503/1820/2656/11753482-f8ca-4e99-b401-fc738e5fbd9e.jpg",
+        "logoResourceLocation": 53,
+        "phoneNumber": "1-888-618-4694",
+        "isPhoneMask": false,
+        "dealerCompleteAddress": "620, Boul. De la Seigneurie, Blainville, QC",
+        "dealerAddress": "620, Boul. De la Seigneurie",
+        "cityProvinceName": "Blainville, QC",
+        "provinceName": "QC",
+        "enableAnnouncementMessageProvList": [
+            ""
+        ],
+        "showAnnouncementMessage": false,
+        "dealerReviewId": -1,
+        "bulletPoints": [],
+        "otlDealerEvent": {
+            "otlDealerEventTitle": "Dealership Event - Ends January 1, 0001",
+            "otlDealerEventImageUrl": "",
+            "enableOTLDealerBanner": true
+        },
+        "dealerLinks": [
+            {
+                "linkUrl": "/dealership/20080509104031281/",
+                "title": "View all inventory",
+                "sellerSectionClientEventHandler": "vdpDataLayerManager.addDealerInventoryClickEvent();",
+                "dealerSectionClientEventHandler": "vdpDataLayerManager.addDealerInventoryClickEvent();",
+                "gaEvent": "gtm_ad_dealer_inventory_link_click",
+                "gaEventDefaultLabel": "vdp"
+            },
+            {
+                "linkUrl": "http://www.hamelbmw.com/?utm_source=autoTRADER&utm_medium=referral",
+                "title": "Dealer website",
+                "sellerSectionClientEventHandler": "vdpDataLayerManager.addDealerWebsiteClickEvent('seller section');",
+                "dealerSectionClientEventHandler": "vdpDataLayerManager.addDealerWebsiteClickEvent('dealer section');",
+                "gaEvent": "gtm_ad_dealer_link_click",
+                "gaEventDefaultLabel": "dealer section",
+                "iconName": "DealerWebSite"
+            }
+        ],
+        "dealerWebsiteInfo": {
+            "linkUrl": "http://www.hamelbmw.com/?utm_source=autoTRADER&utm_medium=referral",
+            "title": "Dealer website",
+            "sellerSectionClientEventHandler": "vdpDataLayerManager.addDealerWebsiteClickEvent('seller section');",
+            "dealerSectionClientEventHandler": "vdpDataLayerManager.addDealerWebsiteClickEvent('dealer section');",
+            "gaEvent": "gtm_ad_dealer_link_click",
+            "gaEventDefaultLabel": "dealer section",
+            "iconName": "DealerWebSite"
+        },
+        "dealerInventoryInfo": {
+            "linkUrl": "/dealership/20080509104031281/",
+            "title": "View all inventory",
+            "sellerSectionClientEventHandler": "vdpDataLayerManager.addDealerInventoryClickEvent();",
+            "dealerSectionClientEventHandler": "vdpDataLayerManager.addDealerInventoryClickEvent();",
+            "gaEvent": "gtm_ad_dealer_inventory_link_click",
+            "gaEventDefaultLabel": "vdp"
+        },
+        "googleMapUrl": "https://maps.google.com/maps?q=Hamel+BMW+620,+Boul.+De+la+Seigneurie+Blainville+Quebec&ll=45.667171,-73.870171&z=16",
+        "navigationAnchorName": "vdp-dealer-widget",
+        "navigationTitle": "Dealer",
+        "dataLayerSectionName": "dealer info",
+        "isTextConnect": true,
+        "textConnectPhone": "4504375050",
+        "order": 180,
+        "googleRating": 4.7,
+        "googleMapsLinkURL": "https://maps.google.com/?cid=11903301985262765712",
+        "showIco": true,
+        "bestPriceAwardUrl": "",
+        "enableSoftLeadsCTAsFromLeadFormXS": false,
+        "isVirtualDealer": false,
+        "isHybridDealer": false
+    },
+    "description": {
+        "dataLayerSectionName": "additionalInfo",
+        "description": [
+            {
+                "description": "ZJ6 - Groupe De Luxe Essentiel$0.00$0.00\n1YX - Roues de 20 pouces, à rayons doubles, 699M, noir jais, perf. RFT$0.00$0.00\n3AC - Attelage De Remorque$0.00$0.00\n3MF - Phares Shadow Line$0.00$0.00\n4ML - Garniture Noir Piano$0.00$0.00\n4GQ - Ceintures De Sécurité M\n\n\nServant la rive nord depuis 15 ans, Hamel BMW est un fier membre du Groupe Hamel. Plus de 80 véhicules d'occasion en inventaire, de la petite cabriolet, aux plus gros des SUV nous avons une gamme complète. Chaque véhicule a été soigneusement inspecté et reconditionné, esthétiquement et mécaniquement. Venez faire la rencontre de un de nos représentants dès maintenant, il pourra vous démontrer tous les avantages de ce procurer une BMW chez HAMEL BMW Blainville. "
+            }
+        ],
+        "isNpv": false,
+        "isPv": true,
+        "isDealer": true,
+        "isPrivate": false,
+        "order": 100,
+        "navigationAnchorName": "vdp-additionalInfo-widget",
+        "navigationTitle": "Description"
+    },
+    "priceAnalysis": {
+        "priceAnalysisDescription": "This vehicle is <b>$2,194 BELOW MARKET (3%)</b>. It is compared to similar vehicles in the <b>Blainville</b> and adjacent area. It’s based on kilometres, year, make, model, trim, manufacturer certification, manufacturer packages, options, and much more.",
+        "averageMarketPrice": "$64,144",
+        "currentAskingPrice": "$61,950",
+        "currentAskingPricePosition": "GoodPriceLowPosition1",
+        "priceEvaluation": "GoodPrice",
+        "dataLayerSectionName": "price analysis",
+        "order": 120,
+        "navigationAnchorName": "vdp-price-Analisys",
+        "navigationTitle": "Price Analysis"
+    },
+    "privateWarrantyLink": "",
+    "sellFunnelURLHost": "",
+    "remoteServices": {
+        "hasUpsellDealerDelivery": false,
+        "hasUpsellHomeTestDrive": false,
+        "hasUpsellDigitalRetail": false,
+        "showDigitalRetailModal": false,
+        "hasLiveChat": false,
+        "hasVirtualAppraisal": true,
+        "hasOnlineReservation": false,
+        "hasBookAnAppointment": true,
+        "hasTryBeforeYouBuy": false,
+        "hasMoneyBackGuarantee": false,
+        "isOnlineSellerPlus": false,
+        "hasGetInsuranceQuote": true
+    },
+    "dealerId": "20080509104031281",
+    "hasDealerEvent": false,
+    "spinDataModel": {
+        "isEnabled": false,
+        "provider": "",
+        "cdnUrl": ""
+    },
+    "preQualViewModel": {
+        "language": "en-ca",
+        "ssoUserInfo": {
+            "isAuthenticated": false,
+            "isLocalAccount": false
+        },
+        "isMobile": false
+    },
+    "aS24OptimizelyTrackingUrl": "/as24-search-funnel/trader-track-event"
+}
