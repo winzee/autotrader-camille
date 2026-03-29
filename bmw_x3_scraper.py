@@ -42,6 +42,10 @@ LISTING_PAUSE_SECS = 15   # Pause between each listing scrape
 
 import re
 import time
+from datetime import datetime as _dt
+
+def log(msg: str) -> None:
+    print(f"[{_dt.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import os
@@ -139,6 +143,8 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
+    # Prevent page loads from hanging indefinitely
+    driver.set_page_load_timeout(30)
     return driver
 
 
@@ -167,52 +173,62 @@ def scroll_to_load_all(driver: webdriver.Chrome, pause: float = 2.0) -> None:
         last_height = new_height
 
 
-def get_listing_urls(driver: webdriver.Chrome, search_url: str) -> List[str]:
-    """Return a list of unique vehicle listing URLs from the search page.
-
-    The function navigates to the provided search URL, accepts cookies if
-    prompted and then scrolls through the page to trigger lazy loading of
-    additional results.  It extracts all anchor tags whose ``href``
-    attribute contains ``'/a/'``, which is the path segment used by
-    AutoTrader.ca for individual vehicle listings.
-
-    Parameters
-    ----------
-    driver : webdriver.Chrome
-        The Selenium driver.
-    search_url : str
-        The fully formed AutoTrader search URL.
-
-    Returns
-    -------
-    List[str]
-        A list of distinct vehicle listing URLs (without query parameters).
-    """
-    driver.get(search_url)
-    # Allow the page to load initial content.
-    time.sleep(3)
+def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
+    """Collect listing links from the current search results page."""
+    # Wait for listing links to appear (up to 15s), retry once if blocked
+    for attempt in range(3):
+        try:
+            WebDriverWait(driver, 15).until(
+                lambda d: d.find_elements(By.CSS_SELECTOR, "a[href*='/a/']")
+            )
+            break
+        except Exception:
+            if attempt < 2:
+                print(f"  Listings not loaded (attempt {attempt + 1}), retrying...")
+                driver.refresh()
+                time.sleep(3)
+            else:
+                print(f"  WARNING: no listing links found (page title: {driver.title})")
+                return set()
     # Attempt to accept cookie consent if present.
     try:
-        consent_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Accept')]" )
+        consent_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Accept')]")
         consent_button.click()
         time.sleep(1)
     except Exception:
-        # No consent pop‑up detected
         pass
     # Scroll to load all results
     scroll_to_load_all(driver)
     # Collect listing links
     links: Set[str] = set()
     anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/a/']")
-    if not anchors:
-        print(f"  WARNING: no listing links found (page title: {driver.title})")
     for anchor in anchors:
         href = anchor.get_attribute("href")
         if href and "/a/" in href:
-            # Strip any query parameters for de‑duplication
             clean = href.split("?")[0]
             links.add(clean)
-    return list(links)
+    return links
+
+
+def get_listing_urls(driver: webdriver.Chrome, search_url: str) -> List[str]:
+    """Return all vehicle listing URLs, paginating through results.
+
+    Iterates through pages using the ``rcs`` offset parameter (increments
+    of 100) until a page returns no new listings.
+    """
+    all_links: Set[str] = set()
+    page = 0
+    while True:
+        page_url = f"{search_url}&rcs={page * 100}"
+        driver.get(page_url)
+        page_links = _collect_page_links(driver)
+        new_links = page_links - all_links
+        if not new_links:
+            break
+        all_links.update(new_links)
+        log(f"  Page {page + 1}: {len(new_links)} new URLs (total: {len(all_links)})")
+        page += 1
+    return list(all_links)
 
 
 def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
@@ -438,11 +454,11 @@ def extract_listing_details(driver: webdriver.Chrome, url: str) -> VehicleListin
         # Add the URL into the data for completeness
         listing = parse_ngvdp_model(data)
         listing.url = url
-        print("  → extracted via ngVdpModel")
+        log("  → extracted via ngVdpModel")
         return listing
     except Exception:
         pass
-    print("  → ngVdpModel unavailable, falling back to BeautifulSoup")
+    log("  → ngVdpModel unavailable, falling back to BeautifulSoup")
     # Fallback: parse the page source via BeautifulSoup.  This will only
     # capture a subset of fields but ensures the scraper still returns a
     # record.
@@ -529,7 +545,6 @@ VEHICLES = [
 
 COMMON_PARAMS = (
     "?rcp=100"          # results per page (max 100)
-    "&rcs=0"            # result offset (0 for first page)
     "&srt=39"           # sort order
     "&yRng=2014%2C"     # year 2014+
     "&pRng="            # no price limit
@@ -550,22 +565,29 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
     """Scrape listings for a single vehicle search and save to CSV."""
     scrape_start_time = datetime.now().isoformat()
     scrape_num = 1
+    existing_urls: Set[str] = set()
     if os.path.exists(output_file):
         try:
             existing_df = pd.read_csv(output_file)
             if "scrape_number" in existing_df.columns:
                 scrape_num = int(existing_df["scrape_number"].max()) + 1
+            if "url" in existing_df.columns:
+                existing_urls = set(existing_df["url"].dropna())
         except (pd.errors.EmptyDataError, KeyError, ValueError):
             pass
 
-    print("Collecting listing URLs...")
+    log("Collecting listing URLs...")
     urls = get_listing_urls(driver, search_url)
-    print(f"Found {len(urls)} vehicle URLs")
-    urls_to_process = urls[:MAX_LISTINGS] if MAX_LISTINGS else urls
-    print(f"Processing {len(urls_to_process)} listings...")
+    log(f"Found {len(urls)} vehicle URLs")
+    # Skip URLs already in the CSV
+    new_urls = [u for u in urls if u not in existing_urls]
+    if len(new_urls) < len(urls):
+        print(f"Skipping {len(urls) - len(new_urls)} already scraped, {len(new_urls)} new")
+    urls_to_process = new_urls[:MAX_LISTINGS] if MAX_LISTINGS else new_urls
+    log(f"Processing {len(urls_to_process)} listings...")
     listings: List[VehicleListing] = []
     for idx, url in enumerate(urls_to_process, start=1):
-        print(f"  {idx}/{len(urls_to_process)}: {url}")
+        log(f"  {idx}/{len(urls_to_process)}: {url}")
         try:
             listing = extract_listing_details(driver, url)
             listing.scrape_number = scrape_num
@@ -578,7 +600,7 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
             time.sleep(LISTING_PAUSE_SECS)
 
     unique_listings = deduplicate_listings(listings)
-    print(f"Keeping {len(unique_listings)} unique listings after deduplication")
+    log(f"Keeping {len(unique_listings)} unique listings after deduplication")
     df = pd.DataFrame([asdict(l) for l in unique_listings])
 
     if not df.empty:
@@ -591,7 +613,7 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
 
     file_exists = os.path.exists(output_file)
     df.to_csv(output_file, mode='a', header=not file_exists, index=False)
-    print(f"Data saved to {output_file}")
+    log(f"Data saved to {output_file}")
 
 
 def main() -> None:
@@ -606,6 +628,11 @@ def main() -> None:
     """
     driver = create_driver(headless=True)
     try:
+        # Warm up the session by visiting the homepage first so the first
+        # search request is not treated as a cold bot hit by Incapsula.
+        log("Warming up session...")
+        driver.get("https://www.autotrader.ca/")
+        time.sleep(5)
         for make_model in VEHICLES:
             search_url = (
                 f"https://www.autotrader.ca/cars/{make_model}/qc/montr%c3%a9al/"
