@@ -38,7 +38,7 @@ scraping.
 
 # ── Scraper settings ─────────────────────────────────────────────────────
 MAX_LISTINGS = None       # Max listings per vehicle (None = all)
-LISTING_PAUSE_SECS = 15   # Pause between each listing scrape
+LISTING_PAUSE_SECS = 0   # Pause between each listing scrape
 
 import re
 import time
@@ -546,14 +546,14 @@ VEHICLES = [
 COMMON_PARAMS = (
     "?rcp=100"          # results per page (max 100)
     "&srt=39"           # sort order
-    "&yRng=2014%2C"     # year 2014+
-    "&pRng="            # no price limit
-    "&prx=100"          # radius in km
+    "&yRng=2010%2C"     # year 2010+
+    "&pRng=20000"       # $20,000 max
+    "&prx=200"          # radius in km
     "&prv=Quebec"       # province
     "&loc=H1X%203J1"    # postal code
+
     "&body=SUV"         # body type
     "&hprc=True"        # has price
-    "&wcp=True"         # with CarProof
     "&sts=Used"         # used vehicles only
     "&inMarket=advancedSearch"
 )
