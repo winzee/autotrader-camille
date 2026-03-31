@@ -99,6 +99,8 @@ class VehicleListing:
     price_evaluation: Optional[str] = None
     google_map_url: Optional[str] = None
     description: Optional[str] = None
+    last_scrape_timestamp: Optional[str] = None
+    is_deleted: Optional[str] = None
 
 
 def create_driver(headless: bool = True) -> webdriver.Chrome:
@@ -539,7 +541,7 @@ OUTPUT_FILE = "used_suv_listings.csv"
 VEHICLES = [
     "subaru/forester",
     "toyota/rav4",
-    "mazda/cx-5",
+    "honda/hr-v",
     "honda/cr-v",
 ]
 
@@ -561,37 +563,45 @@ COMMON_PARAMS = (
 
 
 def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
-                   output_file: str) -> None:
-    """Scrape listings for a single vehicle search and save to CSV."""
-    scrape_start_time = datetime.now().isoformat()
-    scrape_num = 1
-    existing_urls: Set[str] = set()
+                   make_model: str, output_file: str,
+                   scrape_num: int, scrape_time: str) -> None:
+    """Scrape listings for a single vehicle search and save to CSV.
+
+    Updates ``last_scrape_timestamp`` for listings still present and sets
+    ``is_deleted`` for listings that have disappeared from search results.
+    """
+    # Load existing data
+    existing_df = None
     if os.path.exists(output_file):
         try:
             existing_df = pd.read_csv(output_file)
-            if "scrape_number" in existing_df.columns:
-                scrape_num = int(existing_df["scrape_number"].max()) + 1
-            if "url" in existing_df.columns:
-                existing_urls = set(existing_df["url"].dropna())
-        except (pd.errors.EmptyDataError, KeyError, ValueError):
-            pass
+        except pd.errors.EmptyDataError:
+            existing_df = None
+
+    existing_urls: Set[str] = set()
+    if existing_df is not None and "url" in existing_df.columns:
+        existing_urls = set(existing_df["url"].dropna())
 
     log("Collecting listing URLs...")
     urls = get_listing_urls(driver, search_url)
     log(f"Found {len(urls)} vehicle URLs")
-    # Skip URLs already in the CSV
+
+    scraped_url_set = set(urls)
+
+    # Only scrape details for URLs not already in CSV
     new_urls = [u for u in urls if u not in existing_urls]
     if len(new_urls) < len(urls):
         print(f"Skipping {len(urls) - len(new_urls)} already scraped, {len(new_urls)} new")
     urls_to_process = new_urls[:MAX_LISTINGS] if MAX_LISTINGS else new_urls
-    log(f"Processing {len(urls_to_process)} listings...")
+    log(f"Processing {len(urls_to_process)} new listings...")
     listings: List[VehicleListing] = []
     for idx, url in enumerate(urls_to_process, start=1):
         log(f"  {idx}/{len(urls_to_process)}: {url}")
         try:
             listing = extract_listing_details(driver, url)
             listing.scrape_number = scrape_num
-            listing.scrape_timestamp = scrape_start_time
+            listing.scrape_timestamp = scrape_time
+            listing.last_scrape_timestamp = scrape_time
             listings.append(listing)
         except Exception as exc:
             print(f"  Failed: {exc}")
@@ -600,19 +610,43 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
             time.sleep(LISTING_PAUSE_SECS)
 
     unique_listings = deduplicate_listings(listings)
-    log(f"Keeping {len(unique_listings)} unique listings after deduplication")
-    df = pd.DataFrame([asdict(l) for l in unique_listings])
+    log(f"Keeping {len(unique_listings)} unique new listings after deduplication")
+    new_df = pd.DataFrame([asdict(l) for l in unique_listings])
 
-    if not df.empty:
-        cols = df.columns.tolist()
+    # Update existing rows for this vehicle type
+    if existing_df is not None and not existing_df.empty:
+        url_pattern = f"/a/{make_model}/"
+        vehicle_mask = existing_df["url"].str.contains(url_pattern, na=False)
+
+        # Update last_scrape_timestamp for listings still present
+        still_present = vehicle_mask & existing_df["url"].isin(scraped_url_set)
+        existing_df.loc[still_present, "last_scrape_timestamp"] = scrape_time
+
+        # Mark disappeared listings as deleted (only if not already deleted)
+        disappeared = (vehicle_mask
+                       & ~existing_df["url"].isin(scraped_url_set)
+                       & existing_df["is_deleted"].isna())
+        if disappeared.any():
+            log(f"Marking {disappeared.sum()} listings as deleted")
+            existing_df.loc[disappeared, "is_deleted"] = scrape_time
+
+        # Combine existing + new
+        if not new_df.empty:
+            combined = pd.concat([existing_df, new_df], ignore_index=True)
+        else:
+            combined = existing_df
+    else:
+        combined = new_df if not new_df.empty else pd.DataFrame()
+
+    if not combined.empty:
+        cols = combined.columns.tolist()
         if "scrape_timestamp" in cols:
             cols.insert(0, cols.pop(cols.index("scrape_timestamp")))
         if "scrape_number" in cols:
             cols.insert(0, cols.pop(cols.index("scrape_number")))
-        df = df[cols]
+        combined = combined[cols]
 
-    file_exists = os.path.exists(output_file)
-    df.to_csv(output_file, mode='a', header=not file_exists, index=False)
+    combined.to_csv(output_file, index=False)
     log(f"Data saved to {output_file}")
 
 
@@ -626,6 +660,17 @@ def main() -> None:
     scraping documentation【298376264705576†L224-L233】.  Additional pages
     (``rcs`` offsets) could be processed in a loop if required.
     """
+    # Compute scrape number and timestamp once for the entire run
+    scrape_time = datetime.now().isoformat()
+    scrape_num = 1
+    if os.path.exists(OUTPUT_FILE):
+        try:
+            existing_df = pd.read_csv(OUTPUT_FILE)
+            if "scrape_number" in existing_df.columns:
+                scrape_num = int(existing_df["scrape_number"].max()) + 1
+        except (pd.errors.EmptyDataError, KeyError, ValueError):
+            pass
+
     driver = create_driver(headless=True)
     try:
         # Warm up the session by visiting the homepage first so the first
@@ -641,7 +686,8 @@ def main() -> None:
             print(f"\n{'='*60}")
             print(f"Scraping {make_model}")
             print(f"{'='*60}")
-            scrape_vehicle(driver, search_url, OUTPUT_FILE)
+            scrape_vehicle(driver, search_url, make_model, OUTPUT_FILE,
+                           scrape_num, scrape_time)
     finally:
         driver.quit()
 
