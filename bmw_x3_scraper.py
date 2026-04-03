@@ -40,6 +40,7 @@ scraping.
 MAX_LISTINGS = None       # Max listings per vehicle (None = all)
 LISTING_PAUSE_SECS = 0   # Pause between each listing scrape
 
+import json
 import re
 import time
 from datetime import datetime as _dt
@@ -49,6 +50,7 @@ def log(msg: str) -> None:
 from dataclasses import dataclass, asdict
 from datetime import datetime
 import os
+import subprocess
 from typing import List, Dict, Any, Optional, Set, Tuple
 
 from bs4 import BeautifulSoup  # type: ignore
@@ -543,13 +545,14 @@ VEHICLES = [
     "toyota/rav4",
     "honda/hr-v",
     "honda/cr-v",
+    "hyundai/kona",
 ]
 
 COMMON_PARAMS = (
     "?rcp=100"          # results per page (max 100)
     "&srt=39"           # sort order
-    "&yRng=2010%2C"     # year 2010+
-    "&pRng=20000"       # $20,000 max
+    "&yRng=2016%2C"     # year 2016+
+    "&pRng=15000"       # $20,000 max
     "&prx=200"          # radius in km
     "&prv=Quebec"       # province
     "&loc=H1X%203J1"    # postal code
@@ -584,7 +587,9 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
 
     log("Collecting listing URLs...")
     urls = get_listing_urls(driver, search_url)
-    log(f"Found {len(urls)} vehicle URLs")
+    # Skip Ontario listings
+    urls = [u for u in urls if "/ontario/" not in u.lower()]
+    log(f"Found {len(urls)} vehicle URLs (after excluding Ontario)")
 
     scraped_url_set = set(urls)
 
@@ -623,12 +628,16 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
         existing_df.loc[still_present, "last_scrape_timestamp"] = scrape_time
 
         # Mark disappeared listings as deleted (only if not already deleted)
-        disappeared = (vehicle_mask
-                       & ~existing_df["url"].isin(scraped_url_set)
-                       & existing_df["is_deleted"].isna())
-        if disappeared.any():
-            log(f"Marking {disappeared.sum()} listings as deleted")
-            existing_df.loc[disappeared, "is_deleted"] = scrape_time
+        # Skip if scrape returned 0 URLs — that's a scrape failure, not real deletions
+        if scraped_url_set:
+            disappeared = (vehicle_mask
+                           & ~existing_df["url"].isin(scraped_url_set)
+                           & existing_df["is_deleted"].isna())
+            if disappeared.any():
+                log(f"Marking {disappeared.sum()} listings as deleted")
+                existing_df.loc[disappeared, "is_deleted"] = scrape_time
+        else:
+            log("Skipping deletion marking — no URLs scraped (possible scrape failure)")
 
         # Combine existing + new
         if not new_df.empty:
@@ -648,6 +657,239 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
 
     combined.to_csv(output_file, index=False)
     log(f"Data saved to {output_file}")
+
+
+SCATTER_HTML = "suv_scatter.html"
+GIST_ID = "d47eb2219498fa62ddf729c9c96ccdb3"
+
+
+def generate_scatter_html(csv_file: str, output_file: str,
+                          max_price: int = 15000,
+                          max_km: int = 200000) -> None:
+    """Read the CSV and generate an interactive scatter plot HTML file."""
+    df = pd.read_csv(csv_file)
+    # Filter: active listings, within thresholds, known makes
+    df = df[df["is_deleted"].isna()]
+    df = df[(df["price_cad"] <= max_price) & (df["mileage_km"] <= max_km)]
+    df = df[df["make"].isin(["Subaru", "Toyota", "Honda", "Hyundai"])]
+
+    # Freshness tiers: "latest" (last scrape), "recent" (today/yesterday), "old"
+    scrape_nums = df["scrape_number"].dropna().unique()
+    max_scrape = df["scrape_number"].max() if len(scrape_nums) else 0
+    has_multiple = len(scrape_nums) > 1
+    today = datetime.now().date()
+    yesterday = today - __import__("datetime").timedelta(days=1)
+
+    records = []
+    for _, row in df.iterrows():
+        # Determine freshness tier
+        is_latest = has_multiple and int(row["scrape_number"]) == int(max_scrape)
+        scrape_date = None
+        if pd.notna(row.get("scrape_timestamp")):
+            try:
+                scrape_date = datetime.fromisoformat(str(row["scrape_timestamp"])).date()
+            except (ValueError, TypeError):
+                pass
+        is_recent = scrape_date in (today, yesterday) if scrape_date else False
+
+        if is_latest:
+            freshness = "latest"
+        elif is_recent:
+            freshness = "recent"
+        else:
+            freshness = "old"
+
+        records.append({
+            "make": row["make"],
+            "year": int(row["year"]) if pd.notna(row["year"]) else 0,
+            "mileage_km": int(row["mileage_km"]) if pd.notna(row["mileage_km"]) else 0,
+            "price_cad": int(row["price_cad"]) if pd.notna(row["price_cad"]) else 0,
+            "url": row["url"] or "",
+            "title": row["title"] if pd.notna(row.get("title")) else "",
+            "city": row["city"] if pd.notna(row.get("city")) else "",
+            "has_cruise": bool(row["has_cruise"]) if pd.notna(row.get("has_cruise")) else False,
+            "seller_name": row["seller_name"] if pd.notna(row.get("seller_name")) else "",
+            "price_analysis": row["price_analysis_description"] if pd.notna(row.get("price_analysis_description")) else "",
+            "freshness": freshness,
+        })
+
+    json_data = json.dumps(records, ensure_ascii=False)
+    y_min = int(df["price_cad"].min() - 500) if not df.empty else 0
+
+    html = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Used SUVs — Price vs Kilometres</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; height: 100dvh; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; color: #eee; padding: 12px; display: flex; flex-direction: column; }
+  .controls { display: flex; justify-content: center; gap: 20px; margin-bottom: 8px; font-size: 0.9rem; }
+  .controls label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .controls svg { vertical-align: middle; }
+  .chart-wrap { flex: 1; min-height: 300px; position: relative; background: #16213e; border-radius: 12px; padding: 12px; }
+  canvas { cursor: pointer; }
+  #tooltip { position: fixed; background: #0f3460; border: 1px solid #555; border-radius: 8px; padding: 10px 14px; font-size: 0.82rem; pointer-events: none; display: none; z-index: 10; line-height: 1.5; }
+  #tooltip .tt-title { font-weight: bold; }
+  #tooltip .tt-detail { color: #ccc; }
+  #tooltip .tt-city { color: #999; }
+  #tooltip .tt-extra { color: #aaa; font-size: 0.78rem; margin-top: 4px; white-space: pre-line; }
+  #tooltip .tt-open { display: inline-block; margin-top: 6px; background: #e74c3c; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; text-decoration: none; pointer-events: auto; }
+</style>
+</head>
+<body>
+
+<div class="controls">
+  <label><input type="checkbox" checked data-make="Subaru"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Subaru</label>
+  <label><input type="checkbox" checked data-make="Toyota"> <svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Toyota</label>
+  <label><input type="checkbox" checked data-make="Honda"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Honda</label>
+  <label><input type="checkbox" checked data-make="Hyundai"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Hyundai</label>
+</div>
+
+<div class="chart-wrap">
+  <canvas id="chart"></canvas>
+</div>
+
+<div id="tooltip">
+  <div class="tt-title"></div>
+  <div class="tt-detail"></div>
+  <div class="tt-city"></div>
+  <div class="tt-extra"></div>
+  <a class="tt-open" href="#" target="_blank">Open listing</a>
+</div>
+
+<script>
+const SHAPES = { Subaru: 'circle', Toyota: 'triangle', Honda: 'rect', Hyundai: 'rectRot' };
+const COLORS = { latest: '#ffd700', recent: '#2ecc71', old: '#7f8c8d' };
+const SIZES  = { latest: { r: 7, hr: 9, bw: 0 }, recent: { r: 7, hr: 9, bw: 0 }, old: { r: 7, hr: 9, bw: 0 } };
+
+const data = ''' + json_data + ''';
+
+const datasets = {};
+Object.keys(SHAPES).forEach(make => {
+  datasets[make] = { label: make, data: [], meta: [], backgroundColor: [], borderColor: [], pointRadius: [], pointHoverRadius: [], pointBorderColor: [], pointBorderWidth: [], pointStyle: SHAPES[make], showLine: false };
+});
+
+data.forEach(d => {
+  const ds = datasets[d.make];
+  ds.data.push({ x: d.mileage_km, y: d.price_cad });
+  ds.meta.push(d);
+  const f = d.freshness || 'old';
+  const c = COLORS[f], s = SIZES[f];
+  ds.backgroundColor.push(c);
+  ds.borderColor.push(c);
+  ds.pointRadius.push(s.r);
+  ds.pointHoverRadius.push(s.hr);
+  ds.pointBorderColor.push(c);
+  ds.pointBorderWidth.push(0);
+});
+
+Chart.register(ChartDataLabels);
+
+let selectedKey = null;
+function showTooltip(item, cx, cy) {
+  const tt = document.getElementById('tooltip');
+  tt.querySelector('.tt-title').textContent = item.title;
+  tt.querySelector('.tt-detail').textContent = item.year + ' \\u00b7 ' + item.mileage_km.toLocaleString() + ' km \\u00b7 $' + item.price_cad.toLocaleString();
+  tt.querySelector('.tt-city').textContent = item.city;
+  const cruise = item.has_cruise ? 'Yes' : 'No';
+  const extra = 'Cruise: ' + cruise + '\\n' + item.seller_name + (item.price_analysis ? '\\n' + item.price_analysis : '');
+  tt.querySelector('.tt-extra').textContent = extra;
+  tt.querySelector('.tt-open').href = item.url;
+  tt.style.display = 'block';
+  const rect = tt.getBoundingClientRect();
+  const left = Math.min(cx + 14, window.innerWidth - rect.width - 10);
+  const top = Math.min(cy - 10, window.innerHeight - rect.height - 10);
+  tt.style.left = left + 'px';
+  tt.style.top = Math.max(10, top) + 'px';
+}
+document.addEventListener('click', function(e) {
+  if (e.target.closest('#tooltip') || e.target.tagName === 'CANVAS') return;
+  document.getElementById('tooltip').style.display = 'none';
+  selectedKey = null;
+});
+
+const ctx = document.getElementById('chart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'scatter',
+  data: { datasets: Object.values(datasets) },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 600 },
+    scales: {
+      x: {
+        min: 59000,
+        title: { display: true, text: 'Kilometres', color: '#aaa', font: { size: 14 } },
+        ticks: { color: '#888', callback: v => (v/1000).toFixed(0) + 'k' },
+        grid: { color: '#2a2a4a' }
+      },
+      y: {
+        min: ''' + str(y_min) + ''',
+        title: { display: true, text: 'Price (CAD)', color: '#aaa', font: { size: 14 } },
+        ticks: { color: '#888', callback: v => '$' + v.toLocaleString() },
+        grid: { color: '#2a2a4a' }
+      }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: { enabled: false },
+      datalabels: {
+        align: 'bottom',
+        offset: 4,
+        color: '#999',
+        font: { size: 9 },
+        formatter(value, ctx) {
+          const item = ctx.dataset.meta[ctx.dataIndex];
+          return item.make + '\\n' + item.year;
+        }
+      }
+    },
+    onClick(e, elements) {
+      const tt = document.getElementById('tooltip');
+      if (!elements.length) { tt.style.display = 'none'; selectedKey = null; return; }
+      const el = elements[0];
+      const ds = chart.data.datasets[el.datasetIndex];
+      const item = ds.meta[el.index];
+      const key = el.datasetIndex + '-' + el.index;
+      if (selectedKey === key) {
+        window.open(item.url, '_blank');
+        return;
+      }
+      selectedKey = key;
+      showTooltip(item, e.native.clientX, e.native.clientY);
+    },
+    onHover(e, elements) {
+      const tt = document.getElementById('tooltip');
+      if (!elements.length) { if (!('ontouchstart' in window)) { tt.style.display = 'none'; selectedKey = null; } return; }
+      if ('ontouchstart' in window) return;
+      const el = elements[0];
+      const ds = chart.data.datasets[el.datasetIndex];
+      const item = ds.meta[el.index];
+      selectedKey = el.datasetIndex + '-' + el.index;
+      showTooltip(item, e.native.clientX, e.native.clientY);
+    }
+  }
+});
+
+document.querySelectorAll('.controls input').forEach(cb => {
+  cb.addEventListener('change', () => {
+    const idx = chart.data.datasets.findIndex(ds => ds.label === cb.dataset.make);
+    if (idx >= 0) { chart.setDatasetVisibility(idx, cb.checked); chart.update(); }
+  });
+});
+</script>
+
+</body>
+</html>'''
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(html)
+    log(f"Scatter plot written to {output_file}")
 
 
 def main() -> None:
@@ -671,7 +913,7 @@ def main() -> None:
         except (pd.errors.EmptyDataError, KeyError, ValueError):
             pass
 
-    driver = create_driver(headless=True)
+    driver = create_driver(headless=False)
     try:
         # Warm up the session by visiting the homepage first so the first
         # search request is not treated as a cold bot hit by Incapsula.
@@ -690,6 +932,19 @@ def main() -> None:
                            scrape_num, scrape_time)
     finally:
         driver.quit()
+
+    generate_scatter_html(OUTPUT_FILE, SCATTER_HTML)
+    log("Scatter plot updated")
+
+    # Upload to GitHub Gist for iMessage-friendly sharing
+    try:
+        subprocess.run(
+            ["gh", "gist", "edit", GIST_ID, "-f", SCATTER_HTML, SCATTER_HTML],
+            check=True, capture_output=True, text=True,
+        )
+        log(f"Gist updated: https://gist.githack.com/winzee/{GIST_ID}/raw/{SCATTER_HTML}")
+    except Exception as e:
+        log(f"Gist upload failed (non-fatal): {e}")
 
 
 if __name__ == "__main__":

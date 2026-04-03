@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source venv/bin/activate)",
+      "Bash(python bmw_x3_scraper.py)",
+      "Bash(python3 bmw_x3_scraper.py)",
+      "Bash(pip --version)",
+      "Bash(ls venv/bin/python*)",
+      "Bash(venv/bin/python3 --version)",
+      "Bash(ls:*)"
+    ]
+  }
+}

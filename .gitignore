@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .DS_Store
 bmw_x3_used_2021_2023.csv
+*.csv
+*.twb
