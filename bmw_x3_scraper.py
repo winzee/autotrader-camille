@@ -527,17 +527,12 @@ VEHICLES = [
 
 COMMON_PARAMS = (
     "?rcp=100"          # results per page (max 100)
-    "&srt=39"           # sort order
     "&yRng=2016%2C"     # year 2016+
-    "&pRng=15000"       # $20,000 max
+    "&priceto=15000"    # max price (AutoScout24 param)
     "&prx=200"          # radius in km
-    "&prv=Quebec"       # province
     "&loc=H1X%203J1"    # postal code
-
     "&body=SUV"         # body type
-    "&hprc=True"        # has price
     "&sts=Used"         # used vehicles only
-    "&inMarket=advancedSearch"
 )
 
 
