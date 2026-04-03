@@ -38,7 +38,7 @@ scraping.
 
 # ── Scraper settings ─────────────────────────────────────────────────────
 MAX_LISTINGS = None       # Max listings per vehicle (None = all)
-LISTING_PAUSE_SECS = 0   # Pause between each listing scrape
+LISTING_PAUSE_SECS = 5   # Pause between each listing scrape
 
 import json
 import re
@@ -101,6 +101,18 @@ class VehicleListing:
     price_evaluation: Optional[str] = None
     google_map_url: Optional[str] = None
     description: Optional[str] = None
+    image_url: Optional[str] = None
+    is_dealer: Optional[bool] = None
+    carfax_url: Optional[str] = None
+    body_color: Optional[str] = None
+    body_color_original: Optional[str] = None
+    comfort_equipment: Optional[str] = None
+    safety_equipment: Optional[str] = None
+    model_version: Optional[str] = None
+    consumption_city: Optional[float] = None
+    consumption_highway: Optional[float] = None
+    transmission: Optional[str] = None
+    upholstery_color: Optional[str] = None
     last_scrape_timestamp: Optional[str] = None
     is_deleted: Optional[str] = None
 
@@ -179,11 +191,22 @@ def scroll_to_load_all(driver: webdriver.Chrome, pause: float = 2.0) -> None:
 
 def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
     """Collect listing links from the current search results page."""
-    # Wait for listing links to appear (up to 15s), retry once if blocked
+    # Attempt to accept cookie consent if present.
+    try:
+        consent_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Accept')]")
+        consent_button.click()
+        time.sleep(1)
+    except Exception:
+        pass
+    # AutoTrader listing URLs use /offers/ (previously /a/)
+    LISTING_SELECTORS = ["a[href*='/offers/']", "a[href*='/a/']"]
+
+    # Wait for listing links to appear (up to 15s), retry on failure
     for attempt in range(3):
         try:
             WebDriverWait(driver, 15).until(
-                lambda d: d.find_elements(By.CSS_SELECTOR, "a[href*='/a/']")
+                lambda d: any(d.find_elements(By.CSS_SELECTOR, sel)
+                              for sel in LISTING_SELECTORS)
             )
             break
         except Exception:
@@ -194,23 +217,16 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
             else:
                 print(f"  WARNING: no listing links found (page title: {driver.title})")
                 return set()
-    # Attempt to accept cookie consent if present.
-    try:
-        consent_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Accept')]")
-        consent_button.click()
-        time.sleep(1)
-    except Exception:
-        pass
     # Scroll to load all results
     scroll_to_load_all(driver)
-    # Collect listing links
+    # Collect listing links from all known selectors
     links: Set[str] = set()
-    anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/a/']")
-    for anchor in anchors:
-        href = anchor.get_attribute("href")
-        if href and "/a/" in href:
-            clean = href.split("?")[0]
-            links.add(clean)
+    for sel in LISTING_SELECTORS:
+        for anchor in driver.find_elements(By.CSS_SELECTOR, sel):
+            href = anchor.get_attribute("href")
+            if href:
+                clean = href.split("?")[0]
+                links.add(clean)
     return links
 
 
@@ -235,19 +251,14 @@ def get_listing_urls(driver: webdriver.Chrome, search_url: str) -> List[str]:
     return list(all_links)
 
 
-def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
-    """Extract fields from the ngVdpModel JSON into a VehicleListing.
-
-    The keys used here mirror those documented in the Apify Autotrader
-    scraper【298376264705576†L246-L255】.  Not every listing will have all fields
-    populated; missing values remain ``None``. This function includes
-    fallbacks to other potential keys and objects within the JSON data to
-    handle site updates gracefully.
+def parse_next_data(data: Dict[str, Any]) -> VehicleListing:
+    """Extract fields from __NEXT_DATA__ listingDetails into a VehicleListing.
 
     Parameters
     ----------
     data : dict
-        The JavaScript object retrieved from ``window.ngVdpModel``.
+        The ``listingDetails`` object from
+        ``window.__NEXT_DATA__.props.pageProps.listingDetails``.
 
     Returns
     -------
@@ -255,171 +266,147 @@ def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
         A populated VehicleListing dataclass instance.
     """
     listing = VehicleListing()
-    ad_basic = data.get("adBasicInfo", {})
-    hero = data.get("hero", {})
-    seller = data.get("seller", {})
-    price_analysis = data.get("priceAnalysis", {})
-    condition_analysis = data.get("conditionAnalysis", {})
-    dealer_trust = data.get("dealerTrust", {})
-    vehicle = data.get("vehicle", {})  # Added for more robust extraction
+    vehicle = data.get("vehicle", {})
+    seller_obj = data.get("seller", {})
+    prices = data.get("prices", {})
+    identifier = data.get("identifier", {})
+    location = data.get("location", {})
+    tracking = data.get("trackingParams", {})
+    raw_data = vehicle.get("rawData", {})
+    raw_clf = raw_data.get("classification", {})
+    trader_info = data.get("traderProvisioningInfo", {})
+    wltp = vehicle.get("wltp") or {}
+    equipment = vehicle.get("equipment", {})
 
-    # Title: prefer hero.title, fallback to vehicle.title or build from parts
-    title = hero.get("title") or vehicle.get("title")
-    if not title:
-        year = hero.get("year") or vehicle.get("year")
-        make = hero.get("make") or vehicle.get("make")
-        model = hero.get("model") or vehicle.get("model")
-        title = " ".join(str(part) for part in (year, make, model) if part)
-    listing.title = title
+    # ── Core fields ─────────────────────────────────────────────────────
+    listing.make = vehicle.get("make") or (raw_clf.get("make") or {}).get("formatted")
+    listing.model = vehicle.get("model") or (raw_clf.get("model") or {}).get("formatted")
 
-    listing.make = hero.get("make") or ad_basic.get("make")
-    listing.trim = hero.get("trim") or ad_basic.get("trim")
-    year_val = hero.get("year") or vehicle.get("year")
+    year_val = vehicle.get("modelYear") or raw_clf.get("modelYear")
     if year_val is not None:
         try:
             listing.year = int(year_val)
         except (ValueError, TypeError):
             listing.year = None
-    mileage_km = (
-        hero.get("mileage")
-        or ad_basic.get("odometer")
-        or vehicle.get("mileage")
-    )
-    if mileage_km is not None:
-        try:
-            listing.mileage_km = int(mileage_km)
-        except (ValueError, TypeError):
-            listing.mileage_km = int(re.sub(r"[^0-9]", "", str(mileage_km)))
 
-    price_val = (
-        hero.get("price")
-        or ad_basic.get("price")
-        or vehicle.get("price")
+    listing.title = " ".join(
+        str(p) for p in (listing.year, listing.make, listing.model) if p
     )
-    if price_val:
+
+    # ── Price (raw integers) ────────────────────────────────────────────
+    price_val = (
+        (prices.get("public") or {}).get("priceRaw")
+        or (prices.get("dealer") or {}).get("priceRaw")
+        or tracking.get("classified_price")
+    )
+    if price_val is not None:
         try:
             listing.price_cad = int(price_val)
         except (ValueError, TypeError):
-            # Clean string by removing currency symbols and commas
-            listing.price_cad = int(re.sub(r"[^0-9]", "", str(price_val)))
-    else:
-        listing.price_cad = None
-    listing.status = (
-        data.get("status")
-        or hero.get("status")
-        or vehicle.get("condition")
-        or ad_basic.get("adType")
-    )
-    # Corrected seller name extraction based on gu.json
-    listing.seller_name = (
-        ad_basic.get("dealerCoName")
-        or dealer_trust.get("dealerCompanyName")
-        or seller.get("name")
-        or seller.get("seller_name")
-    )
-    listing.is_private_seller = ad_basic.get(
-        "isPrivate",
-        seller.get("is_private_seller", seller.get("isPrivateSeller")),
-    )
-    listing.city = hero.get("location")
-    city_province_name = dealer_trust.get("cityProvinceName")
-    if city_province_name and "," in city_province_name:
-        listing.province = city_province_name.split(",")[1].strip()
-    else:
-        listing.province = None
-    specs = {
-        spec.get("key"): spec.get("value")
-        for spec in data.get("specifications", {}).get("specs", [])
-    }
-    listing.exterior_colour = (
-        hero.get("exterior_colour")
-        or hero.get("exteriorColour")
-        or vehicle.get("exteriorColour")
-        or specs.get("Exterior Colour")
-    )
-    listing.fuel_type = (
-        hero.get("fuel_type")
-        or hero.get("fuelType")
-        or vehicle.get("fuelType")
-        or specs.get("Fuel Type")
-    )
+            listing.price_cad = None
 
-    # The description can be a complex object, so we try to extract the text
-    desc_obj = data.get("description", {})
-    if isinstance(desc_obj, dict):
-        desc_list = desc_obj.get("description")
-        if isinstance(desc_list, list) and desc_list and isinstance(desc_list[0], dict):
-            listing.description = desc_list[0].get("description")
-        else:
-            listing.description = str(desc_obj)
-    else:
-        listing.description = desc_obj
-
-    # Sanitize the description to remove newlines that break the CSV format.
-    if listing.description:
-        listing.description = " ".join(listing.description.split())
-
-    # New fields from CSV based on gu.json
-    listing.ad_id = ad_basic.get("adId")
-    listing.dealer_co_id = ad_basic.get("dealerCoId")
-    car_insurance = data.get("carInsurance", {})
-    listing.vin = (
-        hero.get("vin")
-        or ad_basic.get("vin")
-        or car_insurance.get("vin")
-        or vehicle.get("vin")
+    # ── Mileage (raw km) ───────────────────────────────────────────────
+    mileage_val = (
+        vehicle.get("mileageInKmRaw")
+        or (raw_data.get("condition", {}).get("mileageInKm") or {}).get("raw")
     )
-    listing.price_analysis_description = (
-        hero.get("priceAnalysisDescription")
-        or price_analysis.get("priceAnalysisDescription")
-    )
-    avg_market_price_str = price_analysis.get("averageMarketPrice")
-    if avg_market_price_str:
+    if mileage_val is not None:
         try:
-            cleaned_price = int(re.sub(r"[^0-9]", "", str(avg_market_price_str)))
-            listing.average_market_price = cleaned_price
-            if listing.price_cad is not None:
-                listing.price_vs_market = listing.price_cad - cleaned_price
+            listing.mileage_km = int(mileage_val)
         except (ValueError, TypeError):
-            listing.average_market_price = None
-            listing.price_vs_market = None
+            listing.mileage_km = None
+
+    # ── Seller ──────────────────────────────────────────────────────────
+    listing.seller_name = seller_obj.get("companyName")
+    listing.is_dealer = seller_obj.get("isDealer", seller_obj.get("type") == "Dealer")
+    listing.is_private_seller = not listing.is_dealer if listing.is_dealer is not None else None
+
+    # ── Location ────────────────────────────────────────────────────────
+    listing.city = location.get("city")
+    dealer_info = seller_obj.get("dealer") or {}
+    listing.province = dealer_info.get("region")
+
+    # ── Vehicle details ─────────────────────────────────────────────────
+    listing.model_version = vehicle.get("modelVersionInput") or raw_clf.get("modelVersionInput")
+    listing.trim = listing.model_version
+    listing.body_color = vehicle.get("bodyColor") or vehicle.get("bodyColorOriginal")
+    listing.body_color_original = vehicle.get("bodyColorOriginal")
+    listing.exterior_colour = listing.body_color
+    fuel_cat = vehicle.get("fuelCategory") or {}
+    listing.fuel_type = fuel_cat.get("formatted") if isinstance(fuel_cat, dict) else None
+    listing.transmission = vehicle.get("transmissionType")
+    listing.upholstery_color = vehicle.get("upholsteryColor")
+    listing.status = (vehicle.get("legalCategories") or [None])[0]
+
+    # ── VIN ─────────────────────────────────────────────────────────────
+    v_ident = vehicle.get("identifier") or {}
+    listing.vin = v_ident.get("vin") if isinstance(v_ident, dict) else None
+
+    # ── IDs ─────────────────────────────────────────────────────────────
+    listing.ad_id = identifier.get("crossReferenceId")
+    listing.dealer_co_id = data.get("externalCustomerId")
+
+    # ── Image ───────────────────────────────────────────────────────────
+    images = data.get("images") or []
+    listing.image_url = images[0] if images else None
+
+    # ── CarFax ──────────────────────────────────────────────────────────
+    listing.carfax_url = trader_info.get("CarFaxReportUrl") or None
+
+    # ── Consumption (WLTP raw values) ───────────────────────────────────
+    city_cons = wltp.get("consumptionCity") or {}
+    hwy_cons = wltp.get("consumptionHighway") or {}
+    listing.consumption_city = city_cons.get("raw") if isinstance(city_cons, dict) else None
+    listing.consumption_highway = hwy_cons.get("raw") if isinstance(hwy_cons, dict) else None
+
+    # ── Equipment (comma-delimited strings) ─────────────────────────────
+    comfort_items = equipment.get("comfortAndConvenience") or []
+    safety_items = equipment.get("safetyAndSecurity") or []
+    listing.comfort_equipment = ", ".join(
+        item.get("id", "") for item in comfort_items if item.get("id")
+    ) or None
+    listing.safety_equipment = ", ".join(
+        item.get("id", "") for item in safety_items if item.get("id")
+    ) or None
+
+    # ── Description ─────────────────────────────────────────────────────
+    desc = data.get("description") or ""
+    if isinstance(desc, str):
+        listing.description = " ".join(desc.split())
     else:
-        listing.average_market_price = None
-        listing.price_vs_market = None
+        listing.description = None
 
-    listing.odometer_condition = condition_analysis.get("odometerCondition")
-    listing.google_map_url = dealer_trust.get("googleMapUrl")
-    listing.price_position = price_analysis.get("currentAskingPricePosition")
-    listing.price_evaluation = price_analysis.get("priceEvaluation")
+    # ── Price analysis ──────────────────────────────────────────────────
+    listing.price_evaluation = data.get("price", {}).get("priceEvaluation")
+    public_prices = prices.get("public") or {}
+    eval_ranges = public_prices.get("evaluationRanges") or []
+    fair_range = next((r for r in eval_ranges if r.get("category") == 2), None)
+    if fair_range and listing.price_cad is not None:
+        fair_min = fair_range.get("minimum")
+        fair_max = fair_range.get("maximum")
+        if fair_min is not None and fair_max is not None:
+            market_mid = int((fair_min + fair_max) / 2)
+            listing.average_market_price = market_mid
+            listing.price_vs_market = listing.price_cad - market_mid
+            diff = abs(listing.price_vs_market)
+            if listing.price_vs_market < 0:
+                listing.price_analysis_description = f"${diff:,} BELOW MARKET"
+            else:
+                listing.price_analysis_description = f"${diff:,} ABOVE MARKET"
 
-    # Infer has_driver_assistance from description (e.g. EyeSight for Subaru)
+    # ── Inferred booleans ───────────────────────────────────────────────
     desc_text = (listing.description or "").lower()
+    title_text = (listing.title or "").lower()
+    version_text = (listing.model_version or "").lower()
+    all_equipment = (listing.comfort_equipment or "") + " " + (listing.safety_equipment or "")
+    equip_lower = all_equipment.lower()
+
+    listing.has_cruise = "cruise" in equip_lower or "cruise" in desc_text or "cruise" in title_text
+    listing.has_carplay = "carplay" in desc_text or "carplay" in title_text or "carplay" in version_text
     listing.has_driver_assistance = (
         "eyesight" in desc_text or "driving assistant" in desc_text
         or "assistant de conduite" in desc_text
     )
-
-    # Use structured feature highlights if available
-    highlights = [
-        h.lower() for h in
-        data.get("featureHighlights", {}).get("highlights", [])
-    ]
-
-    # Infer has_carplay from highlights, title, or description
-    title_text = (listing.title or "").lower()
-    listing.has_carplay = (
-        "carplay" in desc_text or "carplay" in title_text
-        or any("carplay" in h for h in highlights)
-    )
-
-    # Infer has_cruise from highlights, title, or description
-    listing.has_cruise = (
-        "cruise control" in desc_text or "cruise" in title_text
-        or any("cruise" in h for h in highlights)
-    )
-
-    # Set model from trim or title
-    listing.model = listing.trim or listing.title
 
     return listing
 
@@ -427,84 +414,54 @@ def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
 def extract_listing_details(driver: webdriver.Chrome, url: str) -> VehicleListing:
     """Visit a vehicle page and extract details into a VehicleListing.
 
-    This function first attempts to read the ``window.ngVdpModel`` object via
-    JavaScript.  If that fails (e.g., due to script loading errors), it
-    falls back to parsing the page HTML with BeautifulSoup.  The fallback
-    extracts fewer fields but still returns a usable result.
-
-    Parameters
-    ----------
-    driver : webdriver.Chrome
-        The Selenium driver.
-    url : str
-        The URL of the vehicle listing page.
-
-    Returns
-    -------
-    VehicleListing
-        The extracted vehicle listing.
+    Reads ``window.__NEXT_DATA__.props.pageProps.listingDetails`` via
+    JavaScript.  If that fails, falls back to parsing the
+    ``<script id="__NEXT_DATA__">`` tag from the raw HTML.
     """
     listing = VehicleListing(url=url)
     try:
         driver.get(url)
     except Exception:
         return listing
-    # Wait for the ngVdpModel object to be available
+
+    # Tier 1: JavaScript extraction
     try:
         WebDriverWait(driver, 10).until(
-            lambda d: d.execute_script("return typeof window.ngVdpModel !== 'undefined'")
+            lambda d: d.execute_script(
+                "return window.__NEXT_DATA__"
+                " && window.__NEXT_DATA__.props"
+                " && window.__NEXT_DATA__.props.pageProps"
+                " && window.__NEXT_DATA__.props.pageProps.listingDetails"
+            )
         )
-        data = driver.execute_script("return window.ngVdpModel")
-        # Add the URL into the data for completeness
-        listing = parse_ngvdp_model(data)
+        data = driver.execute_script(
+            "return window.__NEXT_DATA__.props.pageProps.listingDetails"
+        )
+        listing = parse_next_data(data)
         listing.url = url
-        log("  → extracted via ngVdpModel")
+        log("  -> extracted via __NEXT_DATA__")
         return listing
     except Exception:
         pass
-    log("  → ngVdpModel unavailable, falling back to BeautifulSoup")
-    # Fallback: parse the page source via BeautifulSoup.  This will only
-    # capture a subset of fields but ensures the scraper still returns a
-    # record.
-    html = driver.page_source
-    soup = BeautifulSoup(html, "html.parser")
-    # Attempt to extract title
-    h1 = soup.find("h1")
-    if h1:
-        listing.title = h1.get_text(strip=True)
-    # Find mileage and location line (e.g., "26,000 km | Brossard |")
-    km_text = None
-    for text in soup.stripped_strings:
-        if "km |" in text:
-            km_text = text
-            break
-    if km_text:
-        # Extract mileage as digits
-        km_match = re.search(r"([0-9][0-9,. ]*)\s*km", km_text, re.IGNORECASE)
-        if km_match:
-            try:
-                listing.mileage_km = int(re.sub(r"[^0-9]", "", km_match.group(1)))
-            except Exception:
-                listing.mileage_km = None
-        # Attempt to infer year if it appears at the beginning of the title
-        if listing.title:
-            year_match = re.match(r"(20\d{2})", listing.title)
-            if year_match:
-                listing.year = int(year_match.group(1))
-    # Price extraction
-    price_tag = soup.find(string=re.compile(r"\$[\d,]+"))
-    if price_tag:
-        price_str = price_tag.strip()
-        # Only use it if it looks like a plain price string, not JSON
-        if len(price_str) < 30:
-            listing.price_cad = int(re.sub(r"[^0-9]", "", price_str))
-    # Seller name from page title (format: "YEAR MAKE MODEL | $PRICE | KM | ... by DEALER | CITY, PROV")
-    page_title = soup.find("title")
-    if page_title:
-        title_text = page_title.get_text()
-        by_match = re.search(r"for sale by (.+?) \|", title_text)
-        if by_match:
-            listing.seller_name = by_match.group(1).strip()
+
+    # Tier 2: BeautifulSoup fallback (parse embedded JSON)
+    log("  -> JS unavailable, falling back to BeautifulSoup")
+    try:
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        script_tag = soup.find("script", id="__NEXT_DATA__")
+        if script_tag and script_tag.string:
+            next_data = json.loads(script_tag.string)
+            details = (next_data.get("props", {})
+                       .get("pageProps", {})
+                       .get("listingDetails", {}))
+            if details:
+                listing = parse_next_data(details)
+                listing.url = url
+                log("  -> extracted via BeautifulSoup __NEXT_DATA__")
+                return listing
+    except Exception as exc:
+        log(f"  -> BeautifulSoup fallback failed: {exc}")
+
     return listing
 
 
@@ -589,7 +546,7 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
     urls = get_listing_urls(driver, search_url)
     # Skip Ontario listings
     urls = [u for u in urls if "/ontario/" not in u.lower()]
-    log(f"Found {len(urls)} vehicle URLs (after excluding Ontario)")
+    log(f"Found {len(urls)} vehicle URLs")
 
     scraped_url_set = set(urls)
 
@@ -620,8 +577,10 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
 
     # Update existing rows for this vehicle type
     if existing_df is not None and not existing_df.empty:
-        url_pattern = f"/a/{make_model}/"
-        vehicle_mask = existing_df["url"].str.contains(url_pattern, na=False)
+        vehicle_mask = (
+            existing_df["url"].str.contains(f"/a/{make_model}/", na=False)
+            | existing_df["url"].str.contains(f"/offers/{make_model.replace('/', '-')}", na=False)
+        )
 
         # Update last_scrape_timestamp for listings still present
         still_present = vehicle_mask & existing_df["url"].isin(scraped_url_set)
@@ -672,6 +631,8 @@ def generate_scatter_html(csv_file: str, output_file: str,
     df = df[df["is_deleted"].isna()]
     df = df[(df["price_cad"] <= max_price) & (df["mileage_km"] <= max_km)]
     df = df[df["make"].isin(["Subaru", "Toyota", "Honda", "Hyundai"])]
+    if "province" in df.columns:
+        df = df[df["province"] != "ON"]
 
     # Freshness tiers: "latest" (last scrape), "recent" (today/yesterday), "old"
     scrape_nums = df["scrape_number"].dropna().unique()
@@ -708,9 +669,20 @@ def generate_scatter_html(csv_file: str, output_file: str,
             "title": row["title"] if pd.notna(row.get("title")) else "",
             "city": row["city"] if pd.notna(row.get("city")) else "",
             "has_cruise": bool(row["has_cruise"]) if pd.notna(row.get("has_cruise")) else False,
+            "has_carplay": bool(row["has_carplay"]) if pd.notna(row.get("has_carplay")) else False,
             "seller_name": row["seller_name"] if pd.notna(row.get("seller_name")) else "",
             "price_analysis": row["price_analysis_description"] if pd.notna(row.get("price_analysis_description")) else "",
             "freshness": freshness,
+            "body_color": row["body_color"] if pd.notna(row.get("body_color")) else "",
+            "image_url": row["image_url"] if pd.notna(row.get("image_url")) else "",
+            "carfax_url": row["carfax_url"] if pd.notna(row.get("carfax_url")) else "",
+            "comfort_equipment": row["comfort_equipment"] if pd.notna(row.get("comfort_equipment")) else "",
+            "safety_equipment": row["safety_equipment"] if pd.notna(row.get("safety_equipment")) else "",
+            "consumption_city": float(row["consumption_city"]) if pd.notna(row.get("consumption_city")) else None,
+            "consumption_highway": float(row["consumption_highway"]) if pd.notna(row.get("consumption_highway")) else None,
+            "transmission": row["transmission"] if pd.notna(row.get("transmission")) else "",
+            "upholstery_color": row["upholstery_color"] if pd.notna(row.get("upholstery_color")) else "",
+            "model_version": row["model_version"] if pd.notna(row.get("model_version")) else "",
         })
 
     json_data = json.dumps(records, ensure_ascii=False)
@@ -733,12 +705,22 @@ def generate_scatter_html(csv_file: str, output_file: str,
   .controls svg { vertical-align: middle; }
   .chart-wrap { flex: 1; min-height: 300px; position: relative; background: #16213e; border-radius: 12px; padding: 12px; }
   canvas { cursor: pointer; }
-  #tooltip { position: fixed; background: #0f3460; border: 1px solid #555; border-radius: 8px; padding: 10px 14px; font-size: 0.82rem; pointer-events: none; display: none; z-index: 10; line-height: 1.5; }
+  #tooltip { position: fixed; background: #0f3460; border: 1px solid #555; border-radius: 8px; padding: 10px 14px; font-size: 0.82rem; pointer-events: auto; display: none; z-index: 10; line-height: 1.5; }
   #tooltip .tt-title { font-weight: bold; }
   #tooltip .tt-detail { color: #ccc; }
+  #tooltip .tt-color { color: #bbb; font-size: 0.78rem; }
   #tooltip .tt-city { color: #999; }
   #tooltip .tt-extra { color: #aaa; font-size: 0.78rem; margin-top: 4px; white-space: pre-line; }
-  #tooltip .tt-open { display: inline-block; margin-top: 6px; background: #e74c3c; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; text-decoration: none; pointer-events: auto; }
+  #tooltip .tt-buttons { display: flex; gap: 6px; margin-top: 6px; }
+  #tooltip .tt-open { display: inline-block; background: #e74c3c; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; text-decoration: none; }
+  #tooltip .tt-info-btn { display: inline-block; background: #2980b9; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; border: none; cursor: pointer; }
+  .info-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 100; display: none; justify-content: center; align-items: center; }
+  .info-popup { background: #16213e; border: 1px solid #555; border-radius: 12px; padding: 20px; max-width: 420px; width: 90%; max-height: 80vh; overflow-y: auto; position: relative; color: #eee; font-size: 0.85rem; line-height: 1.6; }
+  .info-popup .info-close { position: absolute; top: 8px; right: 12px; background: none; border: none; color: #aaa; font-size: 1.2rem; cursor: pointer; }
+  .info-popup .info-title { font-weight: bold; font-size: 1rem; margin-bottom: 10px; }
+  .info-popup .info-body div { margin-bottom: 4px; }
+  .info-popup .info-body a { color: #3498db; }
+  .info-popup .info-img { width: 100%; border-radius: 8px; margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -757,9 +739,21 @@ def generate_scatter_html(csv_file: str, output_file: str,
 <div id="tooltip">
   <div class="tt-title"></div>
   <div class="tt-detail"></div>
+  <div class="tt-color"></div>
   <div class="tt-city"></div>
   <div class="tt-extra"></div>
-  <a class="tt-open" href="#" target="_blank">Open listing</a>
+  <div class="tt-buttons">
+    <a class="tt-open" href="#" target="_blank">Open listing</a>
+    <button class="tt-info-btn">Info</button>
+  </div>
+</div>
+
+<div class="info-overlay">
+  <div class="info-popup">
+    <button class="info-close">&times;</button>
+    <div class="info-title"></div>
+    <div class="info-body"></div>
+  </div>
 </div>
 
 <script>
@@ -791,13 +785,18 @@ data.forEach(d => {
 Chart.register(ChartDataLabels);
 
 let selectedKey = null;
+let currentItem = null;
+
 function showTooltip(item, cx, cy) {
+  currentItem = item;
   const tt = document.getElementById('tooltip');
   tt.querySelector('.tt-title').textContent = item.title;
   tt.querySelector('.tt-detail').textContent = item.year + ' \\u00b7 ' + item.mileage_km.toLocaleString() + ' km \\u00b7 $' + item.price_cad.toLocaleString();
+  tt.querySelector('.tt-color').textContent = item.body_color ? 'Color: ' + item.body_color : '';
   tt.querySelector('.tt-city').textContent = item.city;
   const cruise = item.has_cruise ? 'Yes' : 'No';
-  const extra = 'Cruise: ' + cruise + '\\n' + item.seller_name + (item.price_analysis ? '\\n' + item.price_analysis : '');
+  const carplay = item.has_carplay ? 'Yes' : 'No';
+  const extra = 'Cruise: ' + cruise + ' | CarPlay: ' + carplay + '\\n' + item.seller_name + (item.price_analysis ? '\\n' + item.price_analysis : '');
   tt.querySelector('.tt-extra').textContent = extra;
   tt.querySelector('.tt-open').href = item.url;
   tt.style.display = 'block';
@@ -807,6 +806,71 @@ function showTooltip(item, cx, cy) {
   tt.style.left = left + 'px';
   tt.style.top = Math.max(10, top) + 'px';
 }
+
+function showInfoPopup(item) {
+  const overlay = document.querySelector('.info-overlay');
+  const popup = overlay.querySelector('.info-popup');
+  popup.querySelector('.info-title').textContent = item.title;
+  const body = popup.querySelector('.info-body');
+  body.innerHTML = '';
+
+  function addLine(label, value) {
+    if (!value) return;
+    const div = document.createElement('div');
+    const b = document.createElement('strong');
+    b.textContent = label + ': ';
+    div.appendChild(b);
+    const span = document.createElement('span');
+    span.textContent = value;
+    div.appendChild(span);
+    body.appendChild(div);
+  }
+
+  if (item.carfax_url) {
+    const div = document.createElement('div');
+    const a = document.createElement('a');
+    a.href = item.carfax_url;
+    a.target = '_blank';
+    a.textContent = 'CarFax Report';
+    div.appendChild(a);
+    body.appendChild(div);
+  }
+  addLine('Model version', item.model_version);
+  addLine('Transmission', item.transmission);
+  addLine('Body color', item.body_color);
+  addLine('Upholstery', item.upholstery_color);
+  if (item.consumption_city != null || item.consumption_highway != null) {
+    const parts = [];
+    if (item.consumption_city != null) parts.push('City: ' + item.consumption_city + ' L/100km');
+    if (item.consumption_highway != null) parts.push('Hwy: ' + item.consumption_highway + ' L/100km');
+    addLine('Consumption', parts.join(' / '));
+  }
+  addLine('Comfort equipment', item.comfort_equipment);
+  addLine('Safety equipment', item.safety_equipment);
+
+  if (item.image_url) {
+    const img = document.createElement('img');
+    img.src = item.image_url;
+    img.className = 'info-img';
+    img.alt = item.title;
+    body.appendChild(img);
+  }
+
+  overlay.style.display = 'flex';
+}
+
+document.querySelector('.tt-info-btn').addEventListener('click', function(e) {
+  e.stopPropagation();
+  if (currentItem) showInfoPopup(currentItem);
+});
+
+document.querySelector('.info-overlay').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+document.querySelector('.info-close').addEventListener('click', function() {
+  document.querySelector('.info-overlay').style.display = 'none';
+});
+
 document.addEventListener('click', function(e) {
   if (e.target.closest('#tooltip') || e.target.tagName === 'CANVAS') return;
   document.getElementById('tooltip').style.display = 'none';
@@ -920,6 +984,18 @@ def main() -> None:
         log("Warming up session...")
         driver.get("https://www.autotrader.ca/")
         time.sleep(5)
+        # Accept cookies during warm-up to prevent overlay blocking
+        try:
+            consent_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//button[contains(text(), 'Accept')]")
+                )
+            )
+            consent_btn.click()
+            log("Cookies accepted during warm-up")
+            time.sleep(1)
+        except Exception:
+            log("No cookie banner found during warm-up (OK)")
         for make_model in VEHICLES:
             search_url = (
                 f"https://www.autotrader.ca/cars/{make_model}/qc/montr%c3%a9al/"

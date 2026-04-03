@@ -1,0 +1,886 @@
+{
+  "adTargetingString": "{\"mia\":\"false\",\"leasing\":\"false\",\"seg\":\"offroad\",\"did\":\"47946449\",\"stmil\":\"103669\",\"gear\":\"A\",\"make\":\"67\",\"stmak\":\"Subaru\",\"model\":\"15224\",\"stmod\":\"Forester\",\"cost\":\"18795\",\"ad\":\"dealer\",\"art\":\"14\",\"carby\":\"0\",\"fr\":\"1,2,3,4,5,6,7,8,9,10,11\",\"stccm\":\"2500\",\"buyonline\":\"false\",\"equi\":\"50,19,4,21,54,38,136,121,42,12,13\",\"miles\":\"6\",\"img\":\"https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_f1363e8d-b022-4034-bb76-136ea99ec193.jpg/720x540.webp\",\"price\":\"4\",\"rnd\":\"21\",\"ECO\":\"NO\",\"fuel\":\"B\",\"kenteken\":\"false\",\"acc\":\"U\",\"type\":\"U\",\"atsd\":\"\",\"zip\":\"CAH1G 5W9\",\"zip2\":\"H1G 5W9\",\"articleType\":\"C\"}",
+  "adTier": "T10",
+  "appliedAdTier": "T10",
+  "articleType": "car",
+  "availability": {
+    "fromDate": null,
+    "inDays": null,
+    "rawFromDate": null
+  },
+  "coverImageAttractiveness": 0.14022231165024468,
+  "createdTimestampWithOffset": "2026-02-03T17:19:02.709Z",
+  "dealBuilderFullUrl": "https://circuitford.shop.autotrader.ca/details/6550203?id=ac527c21-7574-4cad-9a4e-17590f68b9be&platform=Desktop&dealerId=CT2004318101453573&adid=5_69239724&refurl=https%3A%2F%2Fwww.autotrader.ca%2Foffers%2Fsubaru-forester-2-5i-tourisme-cvt-gasoline-grey-ac527c21-7574-4cad-9a4e-17590f68b9be",
+  "dealBuilderUrlEN": "https://circuitford.shop.autotrader.ca/details/6550203",
+  "dealBuilderUrlFR": "https://circuitford.boutique.autohebdo.net/fr/details/6550203",
+  "description": "La Subaru Forester 2.5 Touring, avec sa traction intégrale symétrique, offre une tenue de route sûre et un confort fiable en toutes conditions<br /><br />Groupe électrique<br />Toit ouvrant panoramique<br />Sièges avant chauffants<br />Sièges arrière chauffants<br />Volant chauffant<br />Système audio Harman Kardon<br />Navigation intégrée avec grand écran<br />Régulateur de vitesse<br />Caméra de recul<br />Et plus encore<br /><br />Inspection Qualité Certifié 121 points sur tous nos véhicules en inventaire<br />Système de repérage TAG 499.99$ en sus<br />Historique Carfax Complet, Aucune réclamation<br /><br />- Depuis 1971<br />- Entreprise familiale<br />- Rapport Carfax gratuit<br />- Véhicules inspectés, reconditionnés<br />- Livraison rapide<br />- Suivi client à long terme<br />- 1, 2 et 3ème chance au crédit<br />- On reprend tous les échanges<br /><br />Depuis 1971, Circuit Ford Lincoln répond aux besoins des acheteurs de la région de Montréal qui recherchent un véhicule d&#x27;occasion de première qualité. Nous prenons à coeur la satisfaction de nos clients et nous assurons que la transaction se déroule en toute transparence. Grâce à notre équipe de techniciens qualifiés, notre garage est recommandé CAA-Québec. Notre concession a reçu plusieurs Prix du Président consécutifs de Ford Canada. Ne tardez pas à venir nous voir pour vivre l&#x27;expérience Circuit Ford Lincoln<br /><br />The Subaru Forester 2.5 Touring, with its symmetrical allwheel drive, delivers confident handling and reliable comfort in any conditions<br /><br />Power group<br />Panoramic sunroof<br />Heated front seats<br />Heated rear seats<br />Heated steering wheel<br />Harman Kardon audio system<br />Integrated navigation with large touchscreen<br />Cruise control<br />Rearview camera<br />And more<br /><br />Certified Quality Inspection 121 points on all our vehicles in inventory<br />TAG tracking system $499.99 extra<br />Full Carfax History, No Claims<br /><br />- Since 1971<br />- Family business<br />- Free Carfax report<br />- Inspected, reconditioned vehicles<br />- Quick and easy delivery<br />- Long term customer follow-up<br />- 1, 2 and 3 chance of credit<br />- We take all trades<br /><br />Since 1971, Circuit Ford Lincoln has been meeting the needs of buyers in the Montreal area who are looking for top quality used vehicle. We take the satisfaction of our customers to heart and ensure that the transaction is transparent. Due to our qualified technicians, our garage is CAA-Quebec recommended. Our dealership received several consecutive President&#x27;s Awards from Ford Canada. Please come see us to experience the Circuit Ford Lincoln experience",
+  "externalCustomerId": "CT2004318101453573",
+  "financingAndInsurance": {
+    "buttonWithFinance": [],
+    "buttonWithInsurance": [],
+    "buttonWithLeasing": []
+  },
+  "financingFlags": {
+    "showStageFinancingAmvLegendSpain": false
+  },
+  "hasThreeSixtyContent": false,
+  "headerImage": "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_f1363e8d-b022-4034-bb76-136ea99ec193.jpg/120x90.webp",
+  "id": "ac527c21-7574-4cad-9a4e-17590f68b9be",
+  "identifier": {
+    "crossReferenceId": "69239724",
+    "legacyId": null,
+    "offerReference": "R0064B"
+  },
+  "images": [
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_f1363e8d-b022-4034-bb76-136ea99ec193.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_de6854a3-21cd-4a7e-b201-7676f5140dcd.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_426cd430-6a38-4d3d-b76d-a95c432398d1.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_fafcc91c-1b73-4fea-94ed-97767db0e90d.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_ad3915ad-3f76-4492-bb48-05c68bd9f268.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_5d12f725-4664-4af0-b0c4-f0e2b9dd4f56.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_4ef42650-3d10-42f4-907f-e6f022025ecf.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_8b25c8eb-49e2-4c92-b460-50fd21a2af99.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_13f483ee-2591-4884-949a-aade3dec1af0.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_02d5f485-3536-4a1c-b4d3-bddf5f7f0e21.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_3719b584-87cb-4b78-ad1a-4786b8ae70f4.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_8f7a2307-f643-4443-9875-f0e5fd79694b.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_c834222a-baf0-4bcd-af8a-eda2bb118811.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_2421cf25-9328-495a-8660-5a857ca5d6c9.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_eaa2c795-d35f-4d83-89f1-271942ca78d9.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_5ee05858-d915-4a26-aaa2-404cad79661b.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_929a939b-b9b2-4924-865d-7ea449a13702.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_e772aaa6-d900-47ce-b692-e6b14f734d38.jpg/1280x960.webp",
+    "https://prod.pictures.autoscout24.net/listing-images/ac527c21-7574-4cad-9a4e-17590f68b9be_ebbc203d-e0c1-4cc4-b667-100c4c3e86d8.jpg/1280x960.webp"
+  ],
+  "imgAltText": "Subaru Forester 2.5i Tourisme CVT Grey",
+  "isCoverImagePlaceholder": false,
+  "isDeliverable": false,
+  "isMIA": false,
+  "isNew": false,
+  "leasingDetails": null,
+  "location": {
+    "city": "Montréal-Nord",
+    "countryCode": "CA",
+    "latitude": 45.60886,
+    "longitude": -73.61109,
+    "street": "6300, Henri-Bourassa Est",
+    "zip": "H1G 5W9"
+  },
+  "ocsInfo": {
+    "__typename": "NotOcs"
+  },
+  "price": {
+    "isConditionalPrice": false,
+    "isVatLabelLegallyRequired": false,
+    "priceEvaluation": 1,
+    "priceFormatted": "$ 18,795"
+  },
+  "prices": {
+    "dealer": {
+      "category": 1,
+      "evaluationRanges": [
+        {
+          "category": 0,
+          "maximum": 15842,
+          "minimum": null
+        },
+        {
+          "category": 1,
+          "maximum": 20087,
+          "minimum": 15842
+        },
+        {
+          "category": 2,
+          "maximum": 21123,
+          "minimum": 20087
+        },
+        {
+          "category": 3,
+          "maximum": 24925,
+          "minimum": 21123
+        },
+        {
+          "category": 4,
+          "maximum": 25495,
+          "minimum": 24925
+        },
+        {
+          "category": 6,
+          "maximum": null,
+          "minimum": 25495
+        }
+      ],
+      "isCategoryAbsent": false,
+      "negotiable": false,
+      "netPrice": null,
+      "netPriceRaw": null,
+      "onRequestOnly": false,
+      "price": "$ 18,795",
+      "priceRaw": 18795,
+      "taxDeductible": false,
+      "vatRate": null
+    },
+    "error": null,
+    "isFinalPrice": false,
+    "popupUrl": "https://www.autoscout24.com/priceevaluation/price-label-explanation-page/ac527c21-7574-4cad-9a4e-17590f68b9be?culture=en-CA",
+    "public": {
+      "category": 1,
+      "evaluationRanges": [
+        {
+          "category": 0,
+          "maximum": 15842,
+          "minimum": null
+        },
+        {
+          "category": 1,
+          "maximum": 20087,
+          "minimum": 15842
+        },
+        {
+          "category": 2,
+          "maximum": 21123,
+          "minimum": 20087
+        },
+        {
+          "category": 3,
+          "maximum": 24925,
+          "minimum": 21123
+        },
+        {
+          "category": 4,
+          "maximum": 25495,
+          "minimum": 24925
+        },
+        {
+          "category": 6,
+          "maximum": null,
+          "minimum": 25495
+        }
+      ],
+      "isCategoryAbsent": false,
+      "negotiable": false,
+      "netPrice": null,
+      "netPriceRaw": null,
+      "onRequestOnly": false,
+      "price": "$ 18,795",
+      "priceRaw": 18795,
+      "taxDeductible": false,
+      "vatRate": null
+    },
+    "suggestedRetail": null
+  },
+  "ratings": null,
+  "seals": null,
+  "searchResultType": "Organic",
+  "searchTrackingParams": [
+    {
+      "key": "boost_level",
+      "value": "b2"
+    },
+    {
+      "key": "applied_boost_level",
+      "value": "b2"
+    },
+    {
+      "key": "relevance_adjustment",
+      "value": "organic"
+    },
+    {
+      "key": "boosting_product",
+      "value": "none"
+    }
+  ],
+  "seller": {
+    "companyName": "Circuit Ford Lincoln",
+    "contactName": null,
+    "dealer": {
+      "covidServices": null,
+      "culture": "en-CA",
+      "hasMyVehiclesRecommenderCarousel": false,
+      "homepageUrl": null,
+      "isFreespeeCallTrackingEnabled": false,
+      "maxImages": null,
+      "nationwideListingsData": null,
+      "openingHours": null,
+      "openingHoursRaw": null,
+      "region": "QC",
+      "superbranding": null,
+      "tieredPricingPackage": null
+    },
+    "id": 47946449,
+    "isDealer": true,
+    "links": {
+      "imprint": "https://www.autoscout24.com/dealerinfo/circuit-ford-lincoln/imprint",
+      "infoPage": "https://www.autoscout24.com/dealerinfo/circuit-ford-lincoln/about-us",
+      "stockLink": "https://www.autoscout24.com/dealerinfo/circuit-ford-lincoln?atype=C"
+    },
+    "logo": {
+      "big": {
+        "href": null
+      },
+      "small": {
+        "href": null
+      }
+    },
+    "phones": [
+      {
+        "callTo": "+18662186572",
+        "formattedNumber": "866-218-6572",
+        "phoneType": "Office"
+      },
+      {
+        "callTo": "+18662186572",
+        "formattedNumber": "866-218-6572",
+        "phoneType": "Office"
+      }
+    ],
+    "sellId": 1000009056,
+    "type": "Dealer"
+  },
+  "specialConditions": [],
+  "statistics": {
+    "leadsRange": "Some"
+  },
+  "status": "Active",
+  "superDeal": null,
+  "threeSixty": null,
+  "trackingParams": {
+    "classified_applied_tier": "t10",
+    "classified_bodyType": 14,
+    "classified_capacity": 2500,
+    "classified_carSegment": "offroad",
+    "classified_customerID": "47946449",
+    "classified_customer_type": "d",
+    "classified_doors": 4,
+    "classified_equipment": "38,136,50,121,13,21,4,54,42,19,12",
+    "classified_exclusiveOffer": "false",
+    "classified_fueltype": "b",
+    "classified_imageContent": "no-placeholder|0.14022231165024468",
+    "classified_images_threesixty": "standard",
+    "classified_isSmyleEligible": "unknown",
+    "classified_leadsRange": "some",
+    "classified_makeId": 67,
+    "classified_makeTxt": "subaru",
+    "classified_mileage": 103669,
+    "classified_modelGroupID": 201384,
+    "classified_modelID": 15224,
+    "classified_modelTxt": "forester",
+    "classified_offerType": "u",
+    "classified_ownershipModels": "tr",
+    "classified_price": 18795,
+    "classified_recency": "regular",
+    "classified_seats": 5,
+    "classified_tier": "t10",
+    "classified_transmission": "a",
+    "classified_zipcode": "H1G 5W9"
+  },
+  "traderProvisioningInfo": {
+    "CarFaxReportUrl": "https://vhr.carfax.ca/?id=aSaA1Wy3CFl4pHEw2AP+djCP0waYcSAy",
+    "carFaxMode": "FreeCarFax",
+    "isCarFaxAvailable": true,
+    "isSMSLeadEnabled": true,
+    "textNumber": ""
+  },
+  "twinnerUrl": null,
+  "vehicle": {
+    "additionalFuel": [],
+    "allFuelTypes": [],
+    "auxiliaryPower": null,
+    "axleSpread": "",
+    "batteryChargingTime": {
+      "formatted": null,
+      "raw": null
+    },
+    "batteryOwnershipType": {
+      "formatted": null,
+      "raw": null
+    },
+    "bodyColor": "Grey",
+    "bodyColorOriginal": "Dark Grey Metallic",
+    "bodyType": "SUV",
+    "brakeType": "",
+    "cabinAxleDistance": "",
+    "carpassMileageUrl": null,
+    "chassisManufacturerName": "",
+    "co2emissionInGramPerKmWithFallback": {
+      "formatted": "- (g/km)",
+      "isFallback": false,
+      "raw": null
+    },
+    "controlModuleName": "",
+    "cylinderCapacity": "2.5 L",
+    "cylinders": 4,
+    "damageConditions": [],
+    "differentialRatio": "",
+    "displacementInCCM": "2,500 cc",
+    "driveTrain": "All Wheel Drive",
+    "electricRangeCity": {
+      "formatted": null,
+      "raw": null
+    },
+    "electricRangeWithFallback": {
+      "formatted": null,
+      "raw": null
+    },
+    "engineCoolingSystem": "",
+    "engineCount": null,
+    "engineHours": "",
+    "engineManufacturerName": "",
+    "engineMountingType": null,
+    "environmentBImSchV35": null,
+    "environmentEuDirective": null,
+    "environmentPkwEnVKV": null,
+    "equipment": {
+      "comfortAndConvenience": [
+        {
+          "categoryId": "comfortAndConvenience",
+          "categoryName": "Comfort & Convenience",
+          "id": "Cruise control"
+        },
+        {
+          "categoryId": "comfortAndConvenience",
+          "categoryName": "Comfort & Convenience",
+          "id": "Heated steering wheel"
+        },
+        {
+          "categoryId": "comfortAndConvenience",
+          "categoryName": "Comfort & Convenience",
+          "id": "Panoramic Roof"
+        },
+        {
+          "categoryId": "comfortAndConvenience",
+          "categoryName": "Comfort & Convenience",
+          "id": "Power Mirrors"
+        },
+        {
+          "categoryId": "comfortAndConvenience",
+          "categoryName": "Comfort & Convenience",
+          "id": "Power windows"
+        },
+        {
+          "categoryId": "comfortAndConvenience",
+          "categoryName": "Comfort & Convenience",
+          "id": "Split Bench Seat"
+        },
+        {
+          "categoryId": "comfortAndConvenience",
+          "categoryName": "Comfort & Convenience",
+          "id": "Sun/Moonroof"
+        },
+        {
+          "categoryId": "comfortAndConvenience",
+          "categoryName": "Comfort & Convenience",
+          "id": "Tinted windows"
+        }
+      ],
+      "safetyAndSecurity": [
+        {
+          "categoryId": "safetyAndSecurity",
+          "categoryName": "Safety & Security",
+          "id": "Electronic stability control"
+        },
+        {
+          "categoryId": "safetyAndSecurity",
+          "categoryName": "Safety & Security",
+          "id": "Fog lights"
+        },
+        {
+          "categoryId": "safetyAndSecurity",
+          "categoryName": "Safety & Security",
+          "id": "Power steering"
+        }
+      ]
+    },
+    "extendedLength": "",
+    "exteriorMaterial": "",
+    "firstRegistrationDate": null,
+    "firstRegistrationDateRaw": null,
+    "flooringMaterial": "",
+    "frameType": "",
+    "fridgeCapacity": "",
+    "fridgePowerType": "",
+    "frontAxleWeightRating": "",
+    "fuelCategory": {
+      "formatted": "Gasoline",
+      "raw": "B"
+    },
+    "fuelConsumptionCombined": {
+      "formatted": "- (l/100 km)",
+      "isFallback": false,
+      "raw": null
+    },
+    "fuelConsumptionExtraUrban": {
+      "formatted": null,
+      "raw": null
+    },
+    "fuelConsumptionUrban": {
+      "formatted": null,
+      "raw": null
+    },
+    "fuelDeliveryType": "",
+    "gears": null,
+    "grossVehicleWeight": null,
+    "hadAccident": false,
+    "hasCarRegistration": false,
+    "hasFullServiceHistory": false,
+    "hasParticleFilter": false,
+    "headCount": null,
+    "hsnTsn": null,
+    "hullMaterial": null,
+    "identifier": {
+      "vin": "JF2SJESC5JH571241"
+    },
+    "isCabinClean": false,
+    "isRental": false,
+    "lastBeltServiceDate": null,
+    "lastTechnicalServiceDate": null,
+    "legalCategories": [
+      "Used"
+    ],
+    "legalCategoriesRaw": [
+      "UsedVehicle"
+    ],
+    "licensePlate": null,
+    "loadHeight": null,
+    "loadLength": null,
+    "loadVolume": null,
+    "loadWidth": null,
+    "make": "Subaru",
+    "makeId": 67,
+    "marketingDescription": "",
+    "maximumTowingWeight": null,
+    "mileageInKm": "103,669 km",
+    "mileageInKmRaw": 103669,
+    "model": "Forester",
+    "modelGenerationId": null,
+    "modelGroup": "Forester",
+    "modelGroupIds": [
+      201384
+    ],
+    "modelId": 15224,
+    "modelOrModelLineId": 15224,
+    "modelVariantId": null,
+    "modelVersionInput": "2.5i Tourisme CVT",
+    "modelYear": 2018,
+    "motorTypeId": null,
+    "newDriverSuitable": null,
+    "newInspection": false,
+    "nextVehicleSafetyInspection": null,
+    "noOfPreviousOwners": null,
+    "nonSmoking": false,
+    "numberOfAxles": null,
+    "numberOfBeds": null,
+    "numberOfDoors": 4,
+    "numberOfSeats": 5,
+    "offerType": "U",
+    "originalMarket": null,
+    "paintType": null,
+    "payload": null,
+    "powerInHp": null,
+    "powerInKw": null,
+    "primaryFuel": {
+      "formatted": null,
+      "raw": null
+    },
+    "productionYear": null,
+    "rawCylinderCapacity": 2.5,
+    "rawData": {
+      "alloyWheelInches": null,
+      "auxiliaryPower": null,
+      "axleSpread": null,
+      "bodyColor": {
+        "formatted": "Grey"
+      },
+      "bodyColorOriginal": "Dark Grey Metallic",
+      "bodyType": {
+        "formatted": "SUV",
+        "raw": "SUV"
+      },
+      "brakeType": null,
+      "cabinAxleDistance": null,
+      "chassisManufacturerName": null,
+      "classification": {
+        "germanHsnTsn": null,
+        "make": {
+          "formatted": "Subaru",
+          "raw": 67
+        },
+        "model": {
+          "formatted": "Forester",
+          "raw": 15224
+        },
+        "modelGeneration": null,
+        "modelGroups": [
+          {
+            "formatted": "Forester",
+            "raw": 201384
+          }
+        ],
+        "modelVariant": null,
+        "modelVersionInput": "2.5i Tourisme CVT",
+        "modelYear": 2018,
+        "motorType": null,
+        "trimLine": {
+          "raw": 15021
+        },
+        "type": "Car"
+      },
+      "condition": {
+        "carpassMileageUrl": null,
+        "damage": {
+          "accidentFree": true,
+          "damageConditions": [],
+          "hasRepairedDamages": null,
+          "isCurrentlyDamaged": false,
+          "isRoadworthy": null
+        },
+        "firstRegistrationDate": null,
+        "isCabinClean": null,
+        "mileageInKm": {
+          "formatted": "103,669 km",
+          "raw": 103669
+        },
+        "newInspection": false,
+        "nonSmoking": false,
+        "numberOfPreviousOwnersExtended": {
+          "formatted": "- (Previous Owners)",
+          "raw": null
+        }
+      },
+      "costModel": null,
+      "differentialRatio": null,
+      "emptyWeight": null,
+      "engine": {
+        "controlModuleName": null,
+        "cylinderCapacity": {
+          "formatted": "2.5 L",
+          "raw": 2.5,
+          "unit": "L"
+        },
+        "driveTrain": {
+          "formatted": "All Wheel Drive"
+        },
+        "engineDisplacementInCCM": {
+          "formatted": "2,500 cc",
+          "raw": 2500
+        },
+        "marketingDescription": null,
+        "numberOfCylinders": 4,
+        "numberOfGears": null,
+        "power": {
+          "hp": null,
+          "kw": null
+        },
+        "transmissionType": {
+          "formatted": "Automatic",
+          "raw": "Automatic"
+        }
+      },
+      "engineCoolingSystem": null,
+      "engineCount": null,
+      "engineHours": null,
+      "engineManufacturerName": null,
+      "engineMountingType": null,
+      "environment": {
+        "environmentLabelsWithFallback": [],
+        "particulateFilter": false
+      },
+      "equipment": {
+        "as24": [
+          {
+            "equipmentCategory": {
+              "formatted": "Comfort & Convenience",
+              "raw": "comfortAndConvenience"
+            },
+            "id": {
+              "formatted": "Cruise control",
+              "raw": 38
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Comfort & Convenience",
+              "raw": "comfortAndConvenience"
+            },
+            "id": {
+              "formatted": "Heated steering wheel",
+              "raw": 136
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Comfort & Convenience",
+              "raw": "comfortAndConvenience"
+            },
+            "id": {
+              "formatted": "Panoramic Roof",
+              "raw": 50
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Comfort & Convenience",
+              "raw": "comfortAndConvenience"
+            },
+            "id": {
+              "formatted": "Power Mirrors",
+              "raw": 121
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Comfort & Convenience",
+              "raw": "comfortAndConvenience"
+            },
+            "id": {
+              "formatted": "Power windows",
+              "raw": 13
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Comfort & Convenience",
+              "raw": "comfortAndConvenience"
+            },
+            "id": {
+              "formatted": "Split Bench Seat",
+              "raw": 21
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Comfort & Convenience",
+              "raw": "comfortAndConvenience"
+            },
+            "id": {
+              "formatted": "Sun/Moonroof",
+              "raw": 4
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Comfort & Convenience",
+              "raw": "comfortAndConvenience"
+            },
+            "id": {
+              "formatted": "Tinted windows",
+              "raw": 54
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Safety & Security",
+              "raw": "safetyAndSecurity"
+            },
+            "id": {
+              "formatted": "Electronic stability control",
+              "raw": 42
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Safety & Security",
+              "raw": "safetyAndSecurity"
+            },
+            "id": {
+              "formatted": "Fog lights",
+              "raw": 19
+            }
+          },
+          {
+            "equipmentCategory": {
+              "formatted": "Safety & Security",
+              "raw": "safetyAndSecurity"
+            },
+            "id": {
+              "formatted": "Power steering",
+              "raw": 12
+            }
+          }
+        ]
+      },
+      "extendedLength": null,
+      "exteriorMaterial": null,
+      "flooringMaterial": null,
+      "frameType": null,
+      "fridgeCapacity": null,
+      "fridgePowerType": null,
+      "frontAxleWeightRating": null,
+      "fuelDeliveryType": null,
+      "fuels": {
+        "additional": [],
+        "allFuelTypes": [],
+        "battery": null,
+        "electricRangeCity": null,
+        "electricRangeWithFallback": null,
+        "fuelCategory": {
+          "formatted": "Gasoline",
+          "raw": "B"
+        },
+        "isPluginHybrid": null,
+        "primary": {
+          "co2emissionInGramPerKmWithFallback": {
+            "formatted": "- (g/km)",
+            "isFallback": false,
+            "raw": null
+          },
+          "consumption": {
+            "combinedWithFallback": {
+              "formatted": "- (l/100 km)",
+              "isFallback": false,
+              "raw": null
+            },
+            "extraUrban": null,
+            "urban": null
+          },
+          "type": null
+        },
+        "wltp": {
+          "co2ClassDischarged": null,
+          "co2ClassWithFallback": null,
+          "co2EmissionsCombinedWeightedWithFallback": null,
+          "co2EmissionsCombinedWithFallback": null,
+          "co2EmissionsDischarged": null,
+          "consumptionCity": {
+            "formatted": "9.2 l/100 km (inner city)",
+            "raw": 9.2
+          },
+          "consumptionCityDischarged": null,
+          "consumptionCombinedDischarged": null,
+          "consumptionCombinedWeightedWithFallback": null,
+          "consumptionCombinedWithFallback": null,
+          "consumptionElectricCity": null,
+          "consumptionElectricCombinedWeightedWithFallback": null,
+          "consumptionElectricCombinedWithFallback": null,
+          "consumptionElectricHighway": null,
+          "consumptionElectricRural": null,
+          "consumptionElectricSuburban": null,
+          "consumptionHighway": {
+            "formatted": "7.4 l/100 km (motorway)",
+            "raw": 7.4
+          },
+          "consumptionHighwayDischarged": null,
+          "consumptionRural": null,
+          "consumptionRuralDischarged": null,
+          "consumptionSuburban": null,
+          "consumptionSuburbanDischarged": null
+        }
+      },
+      "grossVehicleWeight": null,
+      "hasCarRegistration": {
+        "raw": false
+      },
+      "headCount": null,
+      "hullMaterial": null,
+      "identifier": {
+        "licensePlate": null,
+        "vin": "JF2SJESC5JH571241"
+      },
+      "interior": {
+        "numberOfSeats": 5,
+        "upholstery": null,
+        "upholsteryColor": {
+          "formatted": "Brown"
+        }
+      },
+      "legalCategories": [
+        {
+          "formatted": "Used",
+          "raw": "UsedVehicle"
+        }
+      ],
+      "loadHeight": null,
+      "loadLength": null,
+      "loadVolume": null,
+      "loadWidth": null,
+      "maintenance": {
+        "hasFullServiceHistory": {
+          "raw": false
+        },
+        "lastBeltServiceDate": null,
+        "lastTechnicalServiceDate": null,
+        "nextVehicleSafetyInspection": null
+      },
+      "maximumTowingWeight": null,
+      "newDriverSuitable": null,
+      "numberOfAxles": {
+        "formatted": "- (Axle count)",
+        "raw": null
+      },
+      "numberOfBeds": {
+        "formatted": "- (Number of beds)",
+        "raw": null
+      },
+      "numberOfDoors": 4,
+      "originalMarket": null,
+      "paintType": null,
+      "payload": null,
+      "productionDate": null,
+      "rearAxleWeightRating": null,
+      "slideOutCount": null,
+      "steeringType": null,
+      "totalHeight": null,
+      "totalLength": null,
+      "totalWidth": null,
+      "usageState": "U",
+      "wasteTankCapacity": null,
+      "waterTankCapacity": null,
+      "wheelBase": null
+    },
+    "rawDisplacementInCCM": 2500,
+    "rawPowerInHp": null,
+    "rawPowerInKw": null,
+    "rearAxleWeightRating": "",
+    "slideOutCount": null,
+    "steeringType": null,
+    "totalHeight": null,
+    "totalLength": null,
+    "totalWidth": null,
+    "transmissionType": "Automatic",
+    "trimLineId": 15021,
+    "type": "Car",
+    "upholstery": null,
+    "upholsteryColor": "Brown",
+    "variant": null,
+    "wasteTankCapacity": "",
+    "waterTankCapacity": "",
+    "weight": null,
+    "wheelBase": null,
+    "wltp": {
+      "co2ClassDischarged": null,
+      "co2ClassWithFallback": null,
+      "co2EmissionsCombinedWeightedWithFallback": null,
+      "co2EmissionsCombinedWithFallback": null,
+      "co2EmissionsDischarged": null,
+      "consumptionCity": {
+        "formatted": "9.2 l/100 km (inner city)",
+        "raw": 9.2
+      },
+      "consumptionCityDischarged": null,
+      "consumptionCombinedDischarged": null,
+      "consumptionCombinedWeightedWithFallback": null,
+      "consumptionCombinedWithFallback": null,
+      "consumptionElectricCity": null,
+      "consumptionElectricCombinedWeightedWithFallback": null,
+      "consumptionElectricCombinedWithFallback": null,
+      "consumptionElectricHighway": null,
+      "consumptionElectricRural": null,
+      "consumptionElectricSuburban": null,
+      "consumptionHighway": {
+        "formatted": "7.4 l/100 km (motorway)",
+        "raw": 7.4
+      },
+      "consumptionHighwayDischarged": null,
+      "consumptionRural": null,
+      "consumptionRuralDischarged": null,
+      "consumptionSuburban": null,
+      "consumptionSuburbanDischarged": null
+    }
+  },
+  "vehicleType": "ice",
+  "warranty": null,
+  "warrantyExists": false,
+  "webPage": "https://www.autotrader.ca/offers/subaru-forester-2-5i-tourisme-cvt-gasoline-grey-ac527c21-7574-4cad-9a4e-17590f68b9be",
+  "whatsappNumber": null,
+  "youtubeLink": null
+}
