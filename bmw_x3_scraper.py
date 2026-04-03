@@ -244,23 +244,29 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
     return links
 
 
-def get_listing_urls(driver: webdriver.Chrome, search_url: str) -> List[str]:
+def get_listing_urls(driver: webdriver.Chrome, search_url: str,
+                     first_page_loaded: bool = False) -> List[str]:
     """Return all vehicle listing URLs, paginating through results.
 
-    Iterates through pages using the ``rcs`` offset parameter (increments
-    of 100) until a page returns no new listings.
+    Uses ``page=`` parameter (AutoScout24 platform) for pagination.
+    If *first_page_loaded* is True, collects links from the current page
+    first before advancing to page 2.
     """
     all_links: Set[str] = set()
-    page = 0
+    page = 1
     while True:
-        page_url = f"{search_url}&rcs={page * 100}"
-        driver.get(page_url)
+        if page == 1 and first_page_loaded:
+            # Page already loaded by caller — just collect links
+            pass
+        else:
+            page_url = f"{search_url}&page={page}"
+            driver.get(page_url)
         page_links = _collect_page_links(driver)
         new_links = page_links - all_links
         if not new_links:
             break
         all_links.update(new_links)
-        log(f"  Page {page + 1}: {len(new_links)} new URLs (total: {len(all_links)})")
+        log(f"  Page {page}: {len(new_links)} new URLs (total: {len(all_links)})")
         page += 1
     return list(all_links)
 
@@ -538,7 +544,8 @@ COMMON_PARAMS = (
 
 def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
                    make_model: str, output_file: str,
-                   scrape_num: int, scrape_time: str) -> None:
+                   scrape_num: int, scrape_time: str,
+                   first_page_loaded: bool = False) -> None:
     """Scrape listings for a single vehicle search and save to CSV.
 
     Updates ``last_scrape_timestamp`` for listings still present and sets
@@ -557,7 +564,7 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
         existing_urls = set(existing_df["url"].dropna())
 
     log("Collecting listing URLs...")
-    urls = get_listing_urls(driver, search_url)
+    urls = get_listing_urls(driver, search_url, first_page_loaded=first_page_loaded)
     # Skip Ontario listings
     urls = [u for u in urls if "/ontario/" not in u.lower()]
     log(f"Found {len(urls)} vehicle URLs")
@@ -1039,7 +1046,7 @@ def main() -> None:
         print(f"Scraping {VEHICLES[0]}")
         print(f"{'='*60}")
         scrape_vehicle(driver, first_search_url, VEHICLES[0], OUTPUT_FILE,
-                       scrape_num, scrape_time)
+                       scrape_num, scrape_time, first_page_loaded=True)
         # Remaining vehicles
         for make_model in VEHICLES[1:]:
             search_url = (
