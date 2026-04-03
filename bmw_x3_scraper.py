@@ -199,7 +199,7 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
     except Exception:
         pass
     # AutoTrader listing URLs use /offers/ (previously /a/)
-    LISTING_SELECTORS = ["a[href*='/offers/']", "a[href*='/a/']"]
+    LISTING_SELECTORS = ["a[href*='/offers/']"]
 
     # Wait for listing links to appear (up to 15s), retry on failure
     for attempt in range(3):
@@ -215,6 +215,20 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
                 driver.refresh()
                 time.sleep(3)
             else:
+                # Check for CAPTCHA — a blocked page has very few links
+                total_links = len(driver.find_elements(By.TAG_NAME, "a"))
+                if total_links < 20:
+                    log("CAPTCHA detected — please solve it in the browser. Waiting up to 2 min...")
+                    for _ in range(24):
+                        time.sleep(5)
+                        if any(driver.find_elements(By.CSS_SELECTOR, sel)
+                               for sel in LISTING_SELECTORS):
+                            log("CAPTCHA solved, continuing...")
+                            break
+                    else:
+                        log("Timed out waiting for CAPTCHA resolution")
+                        return set()
+                    break  # CAPTCHA solved — proceed to scroll + collect
                 print(f"  WARNING: no listing links found (page title: {driver.title})")
                 return set()
     # Scroll to load all results
@@ -977,14 +991,21 @@ def main() -> None:
         except (pd.errors.EmptyDataError, KeyError, ValueError):
             pass
 
-    driver = create_driver(headless=False)
-    try:
-        # Warm up the session by visiting the homepage first so the first
-        # search request is not treated as a cold bot hit by Incapsula.
+    # Retry with fresh browser sessions until we land on the Next.js app.
+    # AutoTrader A/B-routes ~40% of sessions to the new platform (post
+    # AutoScout24 acquisition) and ~60% to the legacy Angular app which
+    # serves /a/ URLs that can no longer be scraped.
+    first_search_url = (
+        f"https://www.autotrader.ca/cars/{VEHICLES[0]}/qc/montr%c3%a9al/"
+        + COMMON_PARAMS
+    )
+    driver = None
+    for attempt in range(10):
+        driver = create_driver(headless=False)
         log("Warming up session...")
         driver.get("https://www.autotrader.ca/")
         time.sleep(5)
-        # Accept cookies during warm-up to prevent overlay blocking
+        # Accept cookies during warm-up
         try:
             consent_btn = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable(
@@ -995,8 +1016,32 @@ def main() -> None:
             log("Cookies accepted during warm-up")
             time.sleep(1)
         except Exception:
-            log("No cookie banner found during warm-up (OK)")
-        for make_model in VEHICLES:
+            pass
+        # Load first search page and check for Next.js
+        driver.get(first_search_url)
+        time.sleep(8)
+        has_next = driver.execute_script(
+            "return typeof window.__NEXT_DATA__ !== 'undefined'"
+        )
+        if has_next:
+            log(f"Next.js app detected (attempt {attempt + 1})")
+            break
+        log(f"Old Angular app detected (attempt {attempt + 1}), retrying...")
+        driver.quit()
+        driver = None
+    else:
+        log("ERROR: Could not get Next.js app after 10 attempts. Exiting.")
+        return
+
+    try:
+        # First vehicle is already loaded — scrape it directly
+        print(f"\n{'='*60}")
+        print(f"Scraping {VEHICLES[0]}")
+        print(f"{'='*60}")
+        scrape_vehicle(driver, first_search_url, VEHICLES[0], OUTPUT_FILE,
+                       scrape_num, scrape_time)
+        # Remaining vehicles
+        for make_model in VEHICLES[1:]:
             search_url = (
                 f"https://www.autotrader.ca/cars/{make_model}/qc/montr%c3%a9al/"
                 + COMMON_PARAMS
