@@ -623,6 +623,10 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
         combined = new_df if not new_df.empty else pd.DataFrame()
 
     if not combined.empty:
+        # Keep only QC listings
+        if "province" in combined.columns:
+            combined = combined[combined["province"] == "QC"]
+
         cols = combined.columns.tolist()
         if "scrape_timestamp" in cols:
             cols.insert(0, cols.pop(cols.index("scrape_timestamp")))
@@ -702,7 +706,7 @@ def generate_scatter_html(csv_file: str, output_file: str,
         })
 
     json_data = json.dumps(records, ensure_ascii=False)
-    y_min = int(df["price_cad"].min() - 500) if not df.empty else 0
+    y_min = int(df.loc[df["price_cad"] >= 4000, "price_cad"].min() - 200) if not df.empty else 0
 
     html = '''<!DOCTYPE html>
 <html lang="en">
