@@ -7,7 +7,10 @@
       "Bash(pip --version)",
       "Bash(ls venv/bin/python*)",
       "Bash(venv/bin/python3 --version)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(gh gist:*)",
+      "mcp__plugin_playwright_playwright__browser_evaluate",
+      "mcp__plugin_playwright_playwright__browser_navigate"
     ]
   }
 }

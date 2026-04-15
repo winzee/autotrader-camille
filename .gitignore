@@ -5,3 +5,7 @@ __pycache__/
 bmw_x3_used_2021_2023.csv
 *.csv
 *.twb
+.fb_scrape_state.json
+.playwright-mcp/
+fb_profile/
+.claude/scheduled_tasks.lock

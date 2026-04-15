@@ -177,6 +177,7 @@ class VehicleListing:
     upholstery_color: Optional[str] = None
     last_scrape_timestamp: Optional[str] = None
     is_deleted: Optional[str] = None
+    source: Optional[str] = None
 
 
 def create_driver(headless: bool = True) -> webdriver.Chrome:
@@ -351,7 +352,7 @@ def parse_next_data(data: Dict[str, Any]) -> VehicleListing:
     VehicleListing
         A populated VehicleListing dataclass instance.
     """
-    listing = VehicleListing()
+    listing = VehicleListing(source="autotrader")
     vehicle = data.get("vehicle", {})
     seller_obj = data.get("seller", {})
     prices = data.get("prices", {})
@@ -529,7 +530,7 @@ def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
 
     Missing fields remain ``None`` - not every listing has every field.
     """
-    listing = VehicleListing()
+    listing = VehicleListing(source="autotrader")
     ad_basic = data.get("adBasicInfo", {})
     hero = data.get("hero", {})
     seller = data.get("seller", {})
@@ -720,7 +721,7 @@ def extract_listing_details(driver: webdriver.Chrome, url: str) -> VehicleListin
     JavaScript.  If that fails, falls back to parsing the
     ``<script id="__NEXT_DATA__">`` tag from the raw HTML.
     """
-    listing = VehicleListing(url=url)
+    listing = VehicleListing(url=url, source="autotrader")
     try:
         driver.get(url)
     except Exception:
@@ -786,8 +787,8 @@ def deduplicate_listings(listings: List[VehicleListing]) -> List[VehicleListing]
     seen: Set[Tuple[Optional[str], Optional[str]]] = set()
     unique_listings: List[VehicleListing] = []
     for listing in listings:
-        # Use ad_id and dealer_co_id for robust deduplication
-        key = (listing.ad_id, listing.dealer_co_id)
+        # Use (source, ad_id) for robust deduplication across sources
+        key = (listing.source, listing.ad_id)
         if not all(key) or key not in seen:
             if all(key):
                 seen.add(key)
@@ -807,6 +808,20 @@ VEHICLES = [
     "honda/cr-v",
     "hyundai/kona",
 ]
+
+# Per-vehicle Facebook Marketplace search config. Keyed by AutoTrader slug.
+#   query:            free-text search term (FB filter-by-make is unreliable)
+#   regex:            case-insensitive regex applied to the listing title
+#   model_canonical:  model string to write into the ``model`` column
+#   year_range:       (min, max) year kept
+FB_QUERIES: Dict[str, Dict[str, Any]] = {
+    "subaru/forester": {"query": "forester",   "regex": r"forester",      "model_canonical": "Forester", "year_range": (2016, 2099)},
+    "subaru/outback":  {"query": "outback",    "regex": r"outback",       "model_canonical": "OUTBACK",  "year_range": (2016, 2099)},
+    "toyota/rav4":     {"query": "rav4",       "regex": r"rav[\s-]?4",    "model_canonical": "RAV 4",    "year_range": (2016, 2099)},
+    "honda/hr-v":      {"query": "hr-v",       "regex": r"hr[\s-]?v",     "model_canonical": "HR-V",     "year_range": (2016, 2099)},
+    "honda/cr-v":      {"query": "cr-v",       "regex": r"cr[\s-]?v",     "model_canonical": "CR-V",     "year_range": (2016, 2099)},
+    "hyundai/kona":    {"query": "kona",       "regex": r"kona",          "model_canonical": "KONA",     "year_range": (2016, 2099)},
+}
 
 COMMON_PARAMS = (
     "?rcp=100"          # results per page (max 100)
@@ -836,6 +851,9 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
             existing_df = pd.read_csv(output_file)
         except pd.errors.EmptyDataError:
             existing_df = None
+
+    if existing_df is not None and "source" not in existing_df.columns:
+        existing_df["source"] = "autotrader"
 
     existing_urls: Set[str] = set()
     if existing_df is not None and "url" in existing_df.columns:
@@ -879,7 +897,7 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
         vehicle_mask = (
             existing_df["url"].str.contains(f"/a/{make_model}/", na=False)
             | existing_df["url"].str.contains(f"/offers/{make_model.replace('/', '-')}", na=False)
-        )
+        ) & (existing_df["source"] == "autotrader")
 
         # Update last_scrape_timestamp for listings still present
         still_present = vehicle_mask & existing_df["url"].isin(scraped_url_set)
@@ -924,6 +942,46 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
 SCATTER_HTML = "suv_scatter.html"
 GITHUB_REPO = "winzee/autotrader-camille"
 PAGES_URL = f"https://winzee.github.io/autotrader-camille/{SCATTER_HTML}"
+
+
+def collapse_cross_source_duplicates(csv_file: str) -> int:
+    """Drop rows that are the same physical car re-posted (within or across sources).
+
+    Key: ``(make.lower, model.lower, year, mileage_km, price_cad)``. Rows with
+    any key field null are NOT eligible (kept as-is).
+
+    Among duplicates of a single key, keeps:
+      1. ``source == 'autotrader'`` over any other (AutoTrader has richer fields
+         and includes price-vs-market, carfax, etc.)
+      2. Within same source, the earliest ``scrape_timestamp`` (first-seen wins
+         — so stable ad_id persists and incremental rescrapes don't reshuffle).
+
+    Only active (``is_deleted`` NaN) rows are considered; deleted rows pass
+    through untouched. Returns number of rows dropped.
+    """
+    df = pd.read_csv(csv_file)
+    key_cols = ["make", "model", "year", "mileage_km", "price_cad"]
+    eligible = df["is_deleted"].isna() & df[key_cols].notna().all(axis=1)
+    if not eligible.any():
+        return 0
+    cand = df[eligible].copy()
+    cand["_k_make"] = cand["make"].astype(str).str.lower().str.strip()
+    cand["_k_model"] = cand["model"].astype(str).str.lower().str.strip()
+    cand["_k_year"] = cand["year"].astype(int)
+    cand["_k_mi"] = cand["mileage_km"].astype(int)
+    cand["_k_pr"] = cand["price_cad"].astype(int)
+    cand["_src_rank"] = (cand["source"].astype(str).str.lower() != "autotrader").astype(int)
+    cand = cand.sort_values(by=["_src_rank", "scrape_timestamp"], kind="stable")
+    keep = cand.drop_duplicates(
+        subset=["_k_make", "_k_model", "_k_year", "_k_mi", "_k_pr"], keep="first"
+    )
+    drop_idx = cand.index.difference(keep.index)
+    removed = len(drop_idx)
+    if removed == 0:
+        return 0
+    df = df.drop(drop_idx).reset_index(drop=True)
+    df.to_csv(csv_file, index=False)
+    return removed
 
 
 def generate_scatter_html(csv_file: str, output_file: str,
@@ -979,6 +1037,7 @@ def generate_scatter_html(csv_file: str, output_file: str,
             continue
 
         records.append({
+            "source": str(row["source"]).lower() if pd.notna(row.get("source")) else "autotrader",
             "make": row["make"],
             "model": model_display,
             "year": int(row["year"]) if pd.notna(row["year"]) else 0,
@@ -1029,6 +1088,7 @@ def generate_scatter_html(csv_file: str, output_file: str,
   #tooltip .tt-detail { color: #ccc; }
   #tooltip .tt-color { color: #bbb; font-size: 0.78rem; }
   #tooltip .tt-city { color: #999; }
+  #tooltip .tt-source { color: #999; font-size: 0.78rem; }
   #tooltip .tt-extra { color: #aaa; font-size: 0.78rem; margin-top: 4px; white-space: pre-line; }
   #tooltip .tt-buttons { display: flex; gap: 6px; margin-top: 6px; }
   #tooltip .tt-open { display: inline-block; background: #e74c3c; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; text-decoration: none; }
@@ -1051,6 +1111,9 @@ def generate_scatter_html(csv_file: str, output_file: str,
   <label><input type="checkbox" checked data-model="HR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> HR-V</label>
   <label><input type="checkbox" checked data-model="CR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> CR-V</label>
   <label><input type="checkbox" checked data-model="Kona"> <svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Kona</label>
+  <span style="opacity:0.35">|</span>
+  <label><input type="checkbox" checked data-source="autotrader"> AutoTrader</label>
+  <label><input type="checkbox" checked data-source="facebook"> Facebook</label>
 </div>
 
 <div class="chart-wrap">
@@ -1062,6 +1125,7 @@ def generate_scatter_html(csv_file: str, output_file: str,
   <div class="tt-detail"></div>
   <div class="tt-color"></div>
   <div class="tt-city"></div>
+  <div class="tt-source"></div>
   <div class="tt-extra"></div>
   <div class="tt-buttons">
     <a class="tt-open" href="#" target="_blank">Open listing</a>
@@ -1081,6 +1145,8 @@ def generate_scatter_html(csv_file: str, output_file: str,
 const SHAPES = { 'Forester': 'circle', 'Outback': 'rectRot', 'RAV4': 'triangle', 'HR-V': 'rect', 'CR-V': 'rectRounded', 'Kona': 'star' };
 const COLORS = { latest: '#ffd700', recent: '#2ecc71', old: '#7f8c8d' };
 const SIZES  = { latest: { r: 7, hr: 9, bw: 0 }, recent: { r: 7, hr: 9, bw: 0 }, old: { r: 7, hr: 9, bw: 0 } };
+const SOURCE_LABELS = { autotrader: 'AutoTrader', facebook: 'Facebook' };
+const normSource = v => (v || 'autotrader').toString().toLowerCase();
 
 const data = ''' + json_data + ''';
 
@@ -1089,20 +1155,29 @@ Object.keys(SHAPES).forEach(model => {
   datasets[model] = { label: model, data: [], meta: [], backgroundColor: [], borderColor: [], pointRadius: [], pointHoverRadius: [], pointBorderColor: [], pointBorderWidth: [], pointStyle: SHAPES[model], showLine: false };
 });
 
-data.forEach(d => {
-  const ds = datasets[d.model];
-  if (!ds) return;
-  ds.data.push({ x: d.mileage_km, y: d.price_cad });
-  ds.meta.push(d);
-  const f = d.freshness || 'old';
-  const c = COLORS[f], s = SIZES[f];
-  ds.backgroundColor.push(c);
-  ds.borderColor.push(c);
-  ds.pointRadius.push(s.r);
-  ds.pointHoverRadius.push(s.hr);
-  ds.pointBorderColor.push(c);
-  ds.pointBorderWidth.push(SHAPES[d.model] === 'star' ? 2 : 0);
-});
+function rebuild() {
+  const active = new Set([...document.querySelectorAll('.controls input[data-source]')].filter(c => c.checked).map(c => c.dataset.source));
+  Object.values(datasets).forEach(ds => {
+    ds.data = []; ds.meta = []; ds.backgroundColor = []; ds.borderColor = [];
+    ds.pointRadius = []; ds.pointHoverRadius = []; ds.pointBorderColor = []; ds.pointBorderWidth = [];
+  });
+  data.forEach(d => {
+    if (!active.has(normSource(d.source))) return;
+    const ds = datasets[d.model];
+    if (!ds) return;
+    ds.data.push({ x: d.mileage_km, y: d.price_cad });
+    ds.meta.push(d);
+    const f = d.freshness || 'old';
+    const c = COLORS[f], s = SIZES[f];
+    ds.backgroundColor.push(c);
+    ds.borderColor.push(c);
+    ds.pointRadius.push(s.r);
+    ds.pointHoverRadius.push(s.hr);
+    ds.pointBorderColor.push(c);
+    ds.pointBorderWidth.push(SHAPES[d.model] === 'star' ? 2 : 0);
+  });
+}
+rebuild();
 
 Chart.register(ChartDataLabels);
 
@@ -1116,6 +1191,8 @@ function showTooltip(item, cx, cy) {
   tt.querySelector('.tt-detail').textContent = item.year + ' \\u00b7 ' + item.mileage_km.toLocaleString() + ' km \\u00b7 $' + item.price_cad.toLocaleString();
   tt.querySelector('.tt-color').textContent = item.body_color ? 'Color: ' + item.body_color : '';
   tt.querySelector('.tt-city').textContent = item.city;
+  const srcKey = normSource(item.source);
+  tt.querySelector('.tt-source').textContent = 'Source: ' + (SOURCE_LABELS[srcKey] || item.source || 'AutoTrader');
   const cruise = item.has_cruise ? 'Yes' : 'No';
   const carplay = item.has_carplay ? 'Yes' : 'No';
   const extra = 'Cruise: ' + cruise + ' | CarPlay: ' + carplay + '\\n' + item.seller_name + (item.price_analysis ? '\\n' + item.price_analysis : '');
@@ -1157,6 +1234,7 @@ function showInfoPopup(item) {
     div.appendChild(a);
     body.appendChild(div);
   }
+  addLine('Source', SOURCE_LABELS[normSource(item.source)] || item.source);
   addLine('Model version', item.model_version);
   addLine('Transmission', item.transmission);
   addLine('Body color', item.body_color);
@@ -1262,11 +1340,14 @@ const chart = new Chart(ctx, {
   }
 });
 
-document.querySelectorAll('.controls input').forEach(cb => {
+document.querySelectorAll('.controls input[data-model]').forEach(cb => {
   cb.addEventListener('change', () => {
     const idx = chart.data.datasets.findIndex(ds => ds.label === cb.dataset.model);
     if (idx >= 0) { chart.setDatasetVisibility(idx, cb.checked); chart.update(); }
   });
+});
+document.querySelectorAll('.controls input[data-source]').forEach(cb => {
+  cb.addEventListener('change', () => { rebuild(); chart.update(); });
 });
 </script>
 
@@ -1278,36 +1359,31 @@ document.querySelectorAll('.controls input').forEach(cb => {
     log(f"Scatter plot written to {output_file}")
 
 
-def main() -> None:
-    """Scrape all configured vehicles, one at a time.
+def _parse_args():
+    import argparse
+    p = argparse.ArgumentParser(description="Scrape used SUV listings and update the plot.")
+    p.add_argument("--source", choices=["autotrader", "facebook", "all"], default="all",
+                   help="Which source(s) to scrape. Default: all")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Max listings per vehicle (applied to FB; useful for testing).")
+    p.add_argument("--days", type=int, default=None,
+                   help="Override daysSinceListed (FB only). Default: computed from last-scrape state, max 30.")
+    p.add_argument("--make-model", dest="make_model", default=None,
+                   help="Scrape only one vehicle slug (e.g. 'subaru/forester').")
+    p.add_argument("--generate-html-only", action="store_true",
+                   help="Skip scraping — just regenerate the HTML plot from the existing CSV.")
+    p.add_argument("--no-push", action="store_true",
+                   help="Do not commit/push the HTML to GitHub Pages.")
+    return p.parse_args()
 
-    The search URL is assembled with filters for make (BMW), model (X3), year
-    range (2021–2023), vehicle condition (Used), radius (500 km) and postal
-    code (H1X 3J1).  The ``rcp`` parameter is set to 100 to request the
-    maximum number of results per page, as suggested by the AutoTrader
-    scraping documentation【298376264705576†L224-L233】.  Additional pages
-    (``rcs`` offsets) could be processed in a loop if required.
-    """
-    # Compute scrape number and timestamp once for the entire run
-    scrape_time = datetime.now().isoformat()
-    scrape_num = 1
-    if os.path.exists(OUTPUT_FILE):
-        try:
-            existing_df = pd.read_csv(OUTPUT_FILE)
-            if "scrape_number" in existing_df.columns:
-                scrape_num = int(existing_df["scrape_number"].max()) + 1
-        except (pd.errors.EmptyDataError, KeyError, ValueError):
-            pass
 
-    # AutoTrader A/B-routes between the Next.js app (/offers/ URLs,
-    # __NEXT_DATA__) and the legacy Angular app (/a/ URLs, ngVdpModel).
-    # Both are fully scrapeable, so we accept whichever we land on.
+def _scrape_autotrader(vehicles: List[str], scrape_num: int, scrape_time: str) -> None:
+    first = vehicles[0]
     first_search_url = (
-        f"https://www.autotrader.ca/cars/{VEHICLES[0]}/qc/montr%c3%a9al/"
-        + COMMON_PARAMS
+        f"https://www.autotrader.ca/cars/{first}/qc/montr%c3%a9al/" + COMMON_PARAMS
     )
     driver = create_driver(headless=False)
-    log("Warming up session...")
+    log("Warming up AutoTrader session...")
     driver.get("https://www.autotrader.ca/")
     time.sleep(5)
     try:
@@ -1325,30 +1401,105 @@ def main() -> None:
     time.sleep(8)
 
     try:
-        # First vehicle is already loaded — scrape it directly
-        print(f"\n{'='*60}")
-        print(f"Scraping {VEHICLES[0]}")
-        print(f"{'='*60}")
-        scrape_vehicle(driver, first_search_url, VEHICLES[0], OUTPUT_FILE,
+        print(f"\n{'='*60}\nScraping AutoTrader: {first}\n{'='*60}")
+        scrape_vehicle(driver, first_search_url, first, OUTPUT_FILE,
                        scrape_num, scrape_time, first_page_loaded=True)
-        # Remaining vehicles
-        for make_model in VEHICLES[1:]:
+        for make_model in vehicles[1:]:
             search_url = (
-                f"https://www.autotrader.ca/cars/{make_model}/qc/montr%c3%a9al/"
-                + COMMON_PARAMS
+                f"https://www.autotrader.ca/cars/{make_model}/qc/montr%c3%a9al/" + COMMON_PARAMS
             )
-            print(f"\n{'='*60}")
-            print(f"Scraping {make_model}")
-            print(f"{'='*60}")
+            print(f"\n{'='*60}\nScraping AutoTrader: {make_model}\n{'='*60}")
             scrape_vehicle(driver, search_url, make_model, OUTPUT_FILE,
                            scrape_num, scrape_time)
     finally:
         driver.quit()
 
+
+def _scrape_facebook(vehicles: List[str], scrape_num: int, scrape_time: str,
+                     max_listings: int, days_override: Optional[int] = None) -> None:
+    from fb_scraper import (
+        create_fb_driver, scrape_vehicle_facebook,
+        load_fb_scrape_state, save_fb_scrape_state,
+    )
+    # Snapshot the last-scrape timestamp ONCE — so every vehicle in this run
+    # uses the same daysSinceListed window (computed from the prior run's end).
+    session_last_ts = load_fb_scrape_state().get("last_fb_scrape_timestamp")
+    driver = create_fb_driver(headless=False)
+    try:
+        for make_model in vehicles:
+            cfg = FB_QUERIES.get(make_model)
+            if not cfg:
+                log(f"No FB config for {make_model} — skipping")
+                continue
+            print(f"\n{'='*60}\nScraping Facebook: {make_model} (query={cfg['query']!r})\n{'='*60}")
+            scrape_vehicle_facebook(
+                driver, make_model=make_model, query=cfg["query"],
+                model_regex_src=cfg["regex"], model_canonical=cfg["model_canonical"],
+                output_file=OUTPUT_FILE, scrape_num=scrape_num, scrape_time=scrape_time,
+                max_listings=max_listings, year_range=cfg.get("year_range"),
+                session_last_scrape_timestamp=session_last_ts,
+                days_override=days_override,
+            )
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+    # Persist the run's end time ONCE so the next run's window starts here.
+    save_fb_scrape_state({"last_fb_scrape_timestamp": scrape_time})
+
+
+def main() -> None:
+    """Scrape all configured vehicles, one at a time.
+
+    The search URL is assembled with filters for make (BMW), model (X3), year
+    range (2021–2023), vehicle condition (Used), radius (500 km) and postal
+    code (H1X 3J1).  The ``rcp`` parameter is set to 100 to request the
+    maximum number of results per page, as suggested by the AutoTrader
+    scraping documentation【298376264705576†L224-L233】.  Additional pages
+    (``rcs`` offsets) could be processed in a loop if required.
+    """
+    args = _parse_args()
+
+    if args.generate_html_only:
+        generate_scatter_html(OUTPUT_FILE, SCATTER_HTML)
+        log("Scatter plot updated (generate-html-only)")
+        return
+
+    scrape_time = datetime.now().isoformat()
+    scrape_num = 1
+    if os.path.exists(OUTPUT_FILE):
+        try:
+            existing_df = pd.read_csv(OUTPUT_FILE)
+            if "scrape_number" in existing_df.columns:
+                scrape_num = int(existing_df["scrape_number"].max()) + 1
+        except (pd.errors.EmptyDataError, KeyError, ValueError):
+            pass
+
+    if args.make_model:
+        if args.make_model not in VEHICLES:
+            log(f"Unknown make-model: {args.make_model}. Valid: {VEHICLES}")
+            return
+        vehicles = [args.make_model]
+    else:
+        vehicles = list(VEHICLES)
+
+    if args.source in ("autotrader", "all"):
+        _scrape_autotrader(vehicles, scrape_num, scrape_time)
+    if args.source in ("facebook", "all"):
+        max_listings = args.limit if args.limit is not None else 200
+        _scrape_facebook(vehicles, scrape_num, scrape_time,
+                         max_listings=max_listings, days_override=args.days)
+
+    removed = collapse_cross_source_duplicates(OUTPUT_FILE)
+    if removed:
+        log(f"Collapsed {removed} cross-source/same-car duplicate(s)")
+
     generate_scatter_html(OUTPUT_FILE, SCATTER_HTML)
     log("Scatter plot updated")
 
-    # Commit and push to GitHub Pages
+    if args.no_push:
+        return
     try:
         subprocess.run(["git", "add", SCATTER_HTML], check=True, capture_output=True)
         subprocess.run(
