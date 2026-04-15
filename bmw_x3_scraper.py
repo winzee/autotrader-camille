@@ -640,7 +640,8 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
 
 
 SCATTER_HTML = "suv_scatter.html"
-GIST_ID = "d47eb2219498fa62ddf729c9c96ccdb3"
+GITHUB_REPO = "winzee/autotrader-camille"
+PAGES_URL = f"https://winzee.github.io/autotrader-camille/{SCATTER_HTML}"
 
 
 def generate_scatter_html(csv_file: str, output_file: str,
@@ -1064,15 +1065,17 @@ def main() -> None:
     generate_scatter_html(OUTPUT_FILE, SCATTER_HTML)
     log("Scatter plot updated")
 
-    # Upload to GitHub Gist for iMessage-friendly sharing
+    # Commit and push to GitHub Pages
     try:
+        subprocess.run(["git", "add", SCATTER_HTML], check=True, capture_output=True)
         subprocess.run(
-            ["gh", "gist", "edit", GIST_ID, "-f", SCATTER_HTML, SCATTER_HTML],
+            ["git", "commit", "-m", f"Update {SCATTER_HTML}"],
             check=True, capture_output=True, text=True,
         )
-        log(f"Gist updated: https://gist.githack.com/winzee/{GIST_ID}/raw/{SCATTER_HTML}")
+        subprocess.run(["git", "push"], check=True, capture_output=True, text=True)
+        log(f"Pushed to GitHub Pages: {PAGES_URL}")
     except Exception as e:
-        log(f"Gist upload failed (non-fatal): {e}")
+        log(f"GitHub push failed (non-fatal): {e}")
 
 
 if __name__ == "__main__":
