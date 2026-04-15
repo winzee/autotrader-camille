@@ -9,3 +9,4 @@ bmw_x3_used_2021_2023.csv
 .playwright-mcp/
 fb_profile/
 .claude/scheduled_tasks.lock
+fb_card_trace.log

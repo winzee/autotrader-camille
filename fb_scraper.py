@@ -50,10 +50,45 @@ from bmw_x3_scraper import VehicleListing, deduplicate_listings, log
 FB_VEHICLES_CATEGORY_ID = "807311116002614"
 FB_PROFILE_DIR = "fb_profile"
 FB_STATE_FILE = ".fb_scrape_state.json"
+FB_CARD_TRACE_FILE = "fb_card_trace.log"
 
 FB_LISTING_PAUSE_SECS = 5
 FB_LISTING_PAUSE_JITTER = 2.0
 FB_SCROLL_PAUSE_SECS = 3.0
+
+
+# ── Card trace logging ────────────────────────────────────────────────────
+
+def reset_card_trace(path: str = FB_CARD_TRACE_FILE) -> None:
+    """Truncate the card-trace file at the start of a fresh scrape run."""
+    with open(path, "w") as f:
+        f.write(f"=== FB card trace — started {datetime.now().isoformat(timespec='seconds')} ===\n")
+
+
+def trace_section(header: str, path: str = FB_CARD_TRACE_FILE) -> None:
+    with open(path, "a") as f:
+        f.write(f"\n--- {header} ---\n")
+
+
+def trace_card(status: str, card: Dict[str, Any], reason: str = "",
+               path: str = FB_CARD_TRACE_FILE) -> None:
+    """Append one card line. Order: description | price | location | km | URL."""
+    title = (card.get("title") or "?").strip().replace("\n", " ")
+    price_raw = card.get("price_str")
+    try:
+        price = f"CA${int(float(price_raw)):,}" if price_raw else "?"
+    except (TypeError, ValueError):
+        price = f"CA${price_raw}"
+    city = card.get("city") or ""
+    state = card.get("state") or ""
+    loc = ", ".join(x for x in (city, state) if x) or "?"
+    km = card.get("mileage_subtitle") or "?"
+    aid = str(card.get("id") or "")
+    url = card.get("url") or (f"https://www.facebook.com/marketplace/item/{aid}/" if aid else "?")
+    tag = f"{status}:{reason}" if reason else status
+    ts = datetime.now().strftime("%H:%M:%S")
+    with open(path, "a") as f:
+        f.write(f"[{ts}] {tag:<22} | {title} | {price} | {loc} | {km} | {url}\n")
 
 CHROME_BIN = "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 USER_AGENT = (
@@ -102,7 +137,8 @@ def create_fb_driver(headless: bool = False,
 
 # ── Search URL & card-level parsing ───────────────────────────────────────
 
-def build_search_url(query: str, max_price: int = 15000, days_since_listed: int = 30) -> str:
+def build_search_url(query: str, max_price: int = 15000, min_price: int = 6000,
+                     days_since_listed: int = 30) -> str:
     """Build the Marketplace search URL (Montréal) for a free-text ``query``.
 
     Param choices — kept minimal because FB is picky:
@@ -113,7 +149,8 @@ def build_search_url(query: str, max_price: int = 15000, days_since_listed: int 
     q = urllib.parse.quote(query)
     return (
         f"https://www.facebook.com/marketplace/montreal/search"
-        f"?maxPrice={max_price}"
+        f"?minPrice={min_price}"
+        f"&maxPrice={max_price}"
         f"&daysSinceListed={days_since_listed}"
         f"&sortBy=creation_time_descend"
         f"&query={q}"
@@ -200,36 +237,45 @@ def _parse_year_from_title(title: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def reject_reason(card: Dict[str, Any],
+                  model_regex: "re.Pattern[str]",
+                  year_range: Optional[Tuple[int, int]] = None,
+                  allowed_provinces: Optional[Set[str]] = None,
+                  min_price: int = 6000) -> Optional[str]:
+    """Return ``None`` if card passes the filter, else a short reason tag."""
+    if card.get("category_id") != FB_VEHICLES_CATEGORY_ID:
+        return "not-vehicle"
+    if card.get("is_sold") or card.get("is_pending"):
+        return "sold-or-pending"
+    if card.get("is_live") is False:
+        return "not-live"
+    if _parse_mileage_km(card.get("mileage_subtitle")) is None:
+        return "no-mileage"
+    if not model_regex.search(card.get("title") or ""):
+        return "model-mismatch"
+    if allowed_provinces and card.get("state") not in allowed_provinces:
+        return f"province-{card.get('state') or 'none'}"
+    try:
+        price = float(card.get("price_str") or "0")
+        if price < min_price:
+            return f"below-min-price-{int(price)}"
+    except (TypeError, ValueError):
+        pass
+    if year_range:
+        y = _parse_year_from_title(card.get("title") or "")
+        if y is None:
+            return "no-year"
+        if not (year_range[0] <= y <= year_range[1]):
+            return f"outside-year-{y}"
+    return None
+
+
 def is_target_vehicle(card: Dict[str, Any],
                       model_regex: "re.Pattern[str]",
                       year_range: Optional[Tuple[int, int]] = None,
                       allowed_provinces: Optional[Set[str]] = None,
                       min_price: int = 6000) -> bool:
-    """Card-level filter: vehicle category + has mileage + matches model
-    + in allowed province + price above a financing-ad floor + not sold/pending."""
-    if card.get("category_id") != FB_VEHICLES_CATEGORY_ID:
-        return False
-    if card.get("is_sold") or card.get("is_pending"):
-        return False
-    if card.get("is_live") is False:  # explicit False; None = unknown, keep
-        return False
-    if _parse_mileage_km(card.get("mileage_subtitle")) is None:
-        return False
-    if not model_regex.search(card.get("title") or ""):
-        return False
-    if allowed_provinces and card.get("state") not in allowed_provinces:
-        return False
-    try:
-        price = float(card.get("price_str") or "0")
-        if price < min_price:
-            return False
-    except (TypeError, ValueError):
-        pass
-    if year_range:
-        y = _parse_year_from_title(card.get("title") or "")
-        if y is None or not (year_range[0] <= y <= year_range[1]):
-            return False
-    return True
+    return reject_reason(card, model_regex, year_range, allowed_provinces, min_price) is None
 
 
 # ── Scrape state (last-run timestamp) ─────────────────────────────────────
@@ -301,20 +347,23 @@ def get_fb_listing_cards(driver, query: str, days_since_listed: int, max_listing
                          model_regex: "re.Pattern[str]", seen_ad_ids: Set[str],
                          year_range: Optional[Tuple[int, int]] = None,
                          max_price: int = 15000,
-                         max_nonmatching: int = 60,
+                         max_nonmatching: int = 400,
                          allowed_provinces: Optional[Set[str]] = None,
                          min_price: int = 6000) -> List[Dict[str, Any]]:
     """Scroll the search page collecting passing cards until a stop condition.
 
     Stop conditions (whichever hits first):
       * ``max_listings`` passing cards collected
-      * ``max_nonmatching`` cards observed that did not pass the model filter
-        — hard cap protecting against FB padding the feed with unrelated items
-      * An already-seen ``ad_id`` is hit (incremental stop)
-      * Three consecutive scrolls produce zero new passing cards
+      * ``max_nonmatching`` *rejected* cards observed (filtered out by
+        ``reject_reason``) — hard cap protecting against FB padding the feed
       * Page height stops growing
+
+    Already-known ad_ids are skipped (no detail fetch) but do NOT stop the
+    scroll — FB's feed is non-deterministic, so a known ad can appear before
+    fresh unseen ones further down.
     """
-    url = build_search_url(query, max_price=max_price, days_since_listed=days_since_listed)
+    url = build_search_url(query, max_price=max_price, min_price=min_price,
+                           days_since_listed=days_since_listed)
     log(f"FB search URL: {url}")
     driver.get(url)
     time.sleep(4)
@@ -323,51 +372,44 @@ def get_fb_listing_cards(driver, query: str, days_since_listed: int, max_listing
 
     passing: List[Dict[str, Any]] = []
     passing_ids: Set[str] = set()
+    rejected_ids: Set[str] = set()   # cards rejected by reject_reason
     seen_card_ids: Set[str] = set()  # every card we've observed on the page
+    traced_ids: Set[str] = set()     # dedup for trace-file writes
     consecutive_no_height = 0
-    consecutive_no_new_pass = 0
     last_height = 0
 
     for scroll_i in range(40):  # cap scroll attempts
         cards = extract_apollo_listings(driver.page_source)
-        hit_known = False
-        new_pass_this_round = 0
         for card in cards:
             aid = card["id"]
             seen_card_ids.add(aid)
             if aid in seen_ad_ids:
-                log(f"  Hit known ad_id {aid} — stopping")
-                hit_known = True
-                break
-            if aid in passing_ids:
+                if aid not in traced_ids:
+                    trace_card("KNOWN_SKIP", card)
+                    traced_ids.add(aid)
+                continue  # skip detail fetch, but keep scrolling
+            if aid in passing_ids or aid in rejected_ids:
                 continue
-            if is_target_vehicle(card, model_regex, year_range,
-                                 allowed_provinces=allowed_provinces,
-                                 min_price=min_price):
+            reason = reject_reason(card, model_regex, year_range,
+                                   allowed_provinces=allowed_provinces,
+                                   min_price=min_price)
+            if aid not in traced_ids:
+                trace_card("KEEP" if reason is None else "FILTER", card, reason or "")
+                traced_ids.add(aid)
+            if reason is None:
                 passing.append(card)
                 passing_ids.add(aid)
-                new_pass_this_round += 1
                 log(f"  + card #{len(passing)}: {card['title']} | {card['mileage_subtitle']} | {card['city']}")
                 if len(passing) >= max_listings:
                     break
-        if hit_known or len(passing) >= max_listings:
+            else:
+                rejected_ids.add(aid)
+        if len(passing) >= max_listings:
             break
 
-        nonmatching = len(seen_card_ids) - len(passing_ids)
-        if nonmatching >= max_nonmatching:
-            log(f"  Saw {nonmatching} non-matching cards (cap={max_nonmatching}) — stopping "
+        if len(rejected_ids) >= max_nonmatching:
+            log(f"  Saw {len(rejected_ids)} non-matching cards (cap={max_nonmatching}) — stopping "
                 f"with {len(passing)} passing")
-            break
-
-        if new_pass_this_round == 0:
-            consecutive_no_new_pass += 1
-        else:
-            consecutive_no_new_pass = 0
-        # If scrolling for a while with no new passing cards, stop — likely
-        # we've exhausted model matches and FB is suggesting unrelated items.
-        if consecutive_no_new_pass >= 3 and len(seen_card_ids) > 0:
-            log(f"  {consecutive_no_new_pass} scrolls with no new {model_regex.pattern!r} "
-                f"matches ({len(seen_card_ids)} cards seen) — stopping")
             break
 
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -525,10 +567,14 @@ def scrape_vehicle_facebook(driver, make_model: str, query: str,
     if existing_df is not None and "source" not in existing_df.columns:
         existing_df["source"] = "autotrader"
 
-    # Build set of already-seen FB ad_ids (for incremental stop condition)
+    # Build set of already-seen FB ad_ids for THIS model (for incremental stop).
+    # Scoped to model_canonical so an unrelated FB ad bleeding into another model's
+    # search feed doesn't trigger a premature hit_known stop.
     seen_ad_ids: Set[str] = set()
     if existing_df is not None and "source" in existing_df.columns and "ad_id" in existing_df.columns:
-        mask = (existing_df["source"] == "facebook") & existing_df["ad_id"].notna()
+        mask = ((existing_df["source"] == "facebook")
+                & (existing_df["model"] == model_canonical)
+                & existing_df["ad_id"].notna())
         seen_ad_ids = set(existing_df.loc[mask, "ad_id"].astype(str))
 
     # Compute daysSinceListed
@@ -542,6 +588,7 @@ def scrape_vehicle_facebook(driver, make_model: str, query: str,
         days = compute_days_since_listed(last_ts)
     log(f"FB scrape: {make_model} (query={query!r}) max={max_listings} days={days} "
         f"seen_ad_ids={len(seen_ad_ids)}")
+    trace_section(f"{make_model} query={query!r} days={days}")
 
     # Collect cards
     model_regex = re.compile(model_regex_src, re.IGNORECASE)
@@ -563,6 +610,7 @@ def scrape_vehicle_facebook(driver, make_model: str, query: str,
             listing = extract_fb_details(driver, card["id"])
         except Exception as exc:
             log(f"    extract failed: {exc}")
+            trace_card("DROP", card, f"detail-fetch-error:{type(exc).__name__}")
             if idx < len(cards):
                 time.sleep(FB_LISTING_PAUSE_SECS + random.uniform(0, FB_LISTING_PAUSE_JITTER))
             continue
@@ -571,6 +619,7 @@ def scrape_vehicle_facebook(driver, make_model: str, query: str,
         key_fields = [listing.mileage_km, listing.transmission, listing.year]
         if sum(v is None for v in key_fields) >= 2:
             log(f"    dropped (too many null key fields) — {listing.title or card['title']}")
+            trace_card("DROP", card, "detail-null-key-fields")
             if idx < len(cards):
                 time.sleep(FB_LISTING_PAUSE_SECS + random.uniform(0, FB_LISTING_PAUSE_JITTER))
             continue

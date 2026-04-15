@@ -815,12 +815,12 @@ VEHICLES = [
 #   model_canonical:  model string to write into the ``model`` column
 #   year_range:       (min, max) year kept
 FB_QUERIES: Dict[str, Dict[str, Any]] = {
-    "subaru/forester": {"query": "forester",   "regex": r"forester",      "model_canonical": "Forester", "year_range": (2016, 2099)},
-    "subaru/outback":  {"query": "outback",    "regex": r"outback",       "model_canonical": "OUTBACK",  "year_range": (2016, 2099)},
-    "toyota/rav4":     {"query": "rav4",       "regex": r"rav[\s-]?4",    "model_canonical": "RAV 4",    "year_range": (2016, 2099)},
-    "honda/hr-v":      {"query": "hr-v",       "regex": r"hr[\s-]?v",     "model_canonical": "HR-V",     "year_range": (2016, 2099)},
-    "honda/cr-v":      {"query": "cr-v",       "regex": r"cr[\s-]?v",     "model_canonical": "CR-V",     "year_range": (2016, 2099)},
-    "hyundai/kona":    {"query": "kona",       "regex": r"kona",          "model_canonical": "KONA",     "year_range": (2016, 2099)},
+    "subaru/forester": {"query": "subaru forester",  "regex": r"forester",   "model_canonical": "Forester", "year_range": (2016, 2099)},
+    "subaru/outback":  {"query": "subaru outback",   "regex": r"outback",    "model_canonical": "OUTBACK",  "year_range": (2016, 2099)},
+    "toyota/rav4":     {"query": "toyota rav4",      "regex": r"rav[\s-]?4", "model_canonical": "RAV 4",    "year_range": (2016, 2099)},
+    "honda/hr-v":      {"query": "honda hr-v",       "regex": r"hr[\s-]?v",  "model_canonical": "HR-V",     "year_range": (2016, 2099)},
+    "honda/cr-v":      {"query": "honda cr-v",       "regex": r"cr[\s-]?v",  "model_canonical": "CR-V",     "year_range": (2016, 2099)},
+    "hyundai/kona":    {"query": "hyundai kona",     "regex": r"kona",       "model_canonical": "KONA",     "year_range": (2016, 2099)},
 }
 
 COMMON_PARAMS = (
@@ -979,6 +979,49 @@ def collapse_cross_source_duplicates(csv_file: str) -> int:
     removed = len(drop_idx)
     if removed == 0:
         return 0
+
+    def _row_url(row: pd.Series) -> str:
+        src = str(row.get("source") or "").lower()
+        if src == "facebook" and pd.notna(row.get("ad_id")):
+            return f"https://www.facebook.com/marketplace/item/{int(row['ad_id'])}/"
+        return str(row.get("url") or "")
+
+    try:
+        from fb_scraper import FB_CARD_TRACE_FILE
+        trace_path: Optional[str] = FB_CARD_TRACE_FILE
+        with open(trace_path, "a") as f:
+            f.write(f"\n--- collapse_cross_source_duplicates ---\n")
+    except Exception:
+        trace_path = None
+
+    key_cols_k = ["_k_make", "_k_model", "_k_year", "_k_mi", "_k_pr"]
+    keep_by_key = keep.set_index(key_cols_k)
+    for idx in drop_idx:
+        drop_row = cand.loc[idx]
+        key = tuple(drop_row[c] for c in key_cols_k)
+        try:
+            kept_row = keep_by_key.loc[key]
+            if isinstance(kept_row, pd.DataFrame):
+                kept_row = kept_row.iloc[0]
+        except KeyError:
+            kept_row = None
+        make, model = drop_row["make"], drop_row["model"]
+        year, km, price = int(drop_row["year"]), int(drop_row["mileage_km"]), int(drop_row["price_cad"])
+        dropped_src = str(drop_row.get("source") or "?")
+        dropped_url = _row_url(drop_row)
+        if kept_row is not None:
+            kept_src = str(kept_row.get("source") or "?")
+            kept_url = _row_url(kept_row)
+            msg = (f"  Collapse: {make} {model} {year} {km}km ${price} — "
+                   f"dropping {dropped_src} {dropped_url} (kept {kept_src} {kept_url})")
+        else:
+            msg = (f"  Collapse: {make} {model} {year} {km}km ${price} — "
+                   f"dropping {dropped_src} {dropped_url}")
+        log(msg)
+        if trace_path:
+            with open(trace_path, "a") as f:
+                f.write(msg.lstrip() + "\n")
+
     df = df.drop(drop_idx).reset_index(drop=True)
     df.to_csv(csv_file, index=False)
     return removed
@@ -1419,8 +1462,9 @@ def _scrape_facebook(vehicles: List[str], scrape_num: int, scrape_time: str,
                      max_listings: int, days_override: Optional[int] = None) -> None:
     from fb_scraper import (
         create_fb_driver, scrape_vehicle_facebook,
-        load_fb_scrape_state, save_fb_scrape_state,
+        load_fb_scrape_state, save_fb_scrape_state, reset_card_trace,
     )
+    reset_card_trace()
     # Snapshot the last-scrape timestamp ONCE — so every vehicle in this run
     # uses the same daysSinceListed window (computed from the prior run's end).
     session_last_ts = load_fb_scrape_state().get("last_fb_scrape_timestamp")
