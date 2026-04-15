@@ -519,6 +519,7 @@ OUTPUT_FILE = "used_suv_listings.csv"
 
 VEHICLES = [
     "subaru/forester",
+    "subaru/outback",
     "toyota/rav4",
     "honda/hr-v",
     "honda/cr-v",
@@ -529,7 +530,7 @@ COMMON_PARAMS = (
     "?rcp=100"          # results per page (max 100)
     "&yRng=2016%2C"     # year 2016+
     "&priceto=15000"    # max price (AutoScout24 param)
-    "&prx=200"          # radius in km
+    "&prx=300"          # radius in km
     "&loc=H1X%203J1"    # postal code
     "&body=SUV"         # body type
     "&sts=Used"         # used vehicles only
