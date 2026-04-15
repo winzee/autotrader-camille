@@ -2,38 +2,100 @@
 bmw_x3_scraper.py
 -------------------
 
-This script scrapes used BMW X3 listings from AutoTrader.ca for model years
-2021‑2023 located within 500 km of the postal code “H1X 3J1” (Montreal,
-Quebec).  It navigates the AutoTrader search results page with Selenium,
-collects all listing URLs and then visits each detail page.  Most of the
-structured vehicle data resides in a JavaScript object called
-``window.ngVdpModel`` which AutoTrader injects into each vehicle page.  Once
-available, that object contains the ad’s make, model, year, mileage, price,
-seller information and more【298376264705576†L224-L233】.  By pulling data
-from this object the scraper can reliably extract the fields listed in
-AutoTrader’s own documentation【298376264705576†L246-L255】.
+Scrapes used SUV listings from AutoTrader.ca for a configurable list of
+make/model combinations (see ``VEHICLES``), centered on postal code H1X 3J1
+(Montreal). Results are written to ``used_suv_listings.csv`` and an
+interactive scatter plot is regenerated and pushed to GitHub Pages on every
+run. Filename is kept as ``bmw_x3_scraper.py`` for historical reasons — the
+scraper started life targeting BMW X3 listings.
 
-Because the site is built with client‑side JavaScript it cannot be scraped
-reliably using ``requests`` alone.  The script therefore uses Selenium
-alongside ``webdriver_manager`` to automatically download and manage a
-compatible version of ChromeDriver.  It scrolls through the results page
-(AutoTrader loads more vehicles as you scroll) and grabs every anchor tag
-whose URL path contains ``/a/``, which points to a specific vehicle listing.
-Each listing is visited and the contents of ``window.ngVdpModel`` are read
-via ``driver.execute_script``; if this object does not materialise the script
-falls back to parsing the page’s HTML with BeautifulSoup.
+Because autotrader.ca is a client-side JavaScript app, it cannot be scraped
+reliably with ``requests`` alone. The script uses Selenium with
+``webdriver_manager`` to download a matching ChromeDriver, launches Chrome
+for Testing in headless mode, scrolls search pages to trigger lazy loads,
+collects listing URLs, and visits each detail page to read an in-page
+JavaScript data object.
 
-Duplicate listings are removed by keying on the seller name, year and
-mileage.  Finally, the collected data are written to ``subaru_forester_used_2014_plus.csv``.
+==============================================================================
+  AutoTrader dual-app architecture (IMPORTANT — read before modifying)
+==============================================================================
 
-To run this script you will need the following Python packages:
+Since AutoTrader's 2024 AutoScout24 acquisition, autotrader.ca runs TWO
+parallel front-end applications and A/B-routes sessions between them:
 
+  * Next.js (the "new" app) — uses ``/offers/<slug>`` detail URLs and
+    exposes ``window.__NEXT_DATA__.props.pageProps.listingDetails``.
+
+  * Angular (the "legacy" app) — uses ``/a/<make>/<model>/...`` detail
+    URLs and exposes ``window.ngVdpModel``. Still fully functional.
+
+The routing is server-side and appears time-windowed: a given client IP
+can land on Next.js at 7 AM and on Angular at 10 AM on the same day. Neither
+cookies, user-agent, nor fingerprint overrides the decision — see
+``investigation_notes.md`` for the full reproduction and data (2026-04-15).
+
+Earlier versions of this scraper (commit e97c882 and before) parsed
+``ngVdpModel`` only. The scraper was then migrated to ``__NEXT_DATA__``
+under the incorrect assumption that the Angular app was being deprecated.
+On 2026-04-15, 16 of 16 sessions landed on Angular across four prx-variant
+tests, with Angular detail pages still serving complete ``ngVdpModel`` data.
+The scraper now handles BOTH paths.
+
+How the dual path works:
+
+  1. Search page — ``_collect_page_links()`` accepts either ``/offers/``
+     or ``/a/`` anchors. Both apps are paginated with ``&page=N``; Angular
+     also eagerly loads results via infinite scroll, so
+     ``scroll_to_load_all()`` runs on every page fetch.
+
+  2. Detail page — ``extract_listing_details()`` tries parsers in order:
+       Tier 1a: ``window.__NEXT_DATA__`` -> ``parse_next_data()``
+       Tier 1b: ``window.ngVdpModel``    -> ``parse_ngvdp_model()``
+       Tier 2:  BeautifulSoup on embedded ``<script id="__NEXT_DATA__">``
+       Tier 3:  BeautifulSoup on raw HTML (fragmentary fallback)
+
+  3. ``main()`` warms up a session (landing page + cookie consent), loads
+     the first search URL, logs which app it landed on, and proceeds
+     regardless. No retry loop — we accept whatever app we are served.
+
+==============================================================================
+  Sample schema reference
+==============================================================================
+
+``gu.json`` in the repo is a sample dump of the Angular ``ngVdpModel``
+object. Use it to navigate nested keys (``adBasicInfo``, ``hero``,
+``priceAnalysis``, ``conditionAnalysis``, ``dealerTrust``, ``specifications``,
+``featureHighlights``, etc.) when adding new fields.
+
+There is no equivalent dump for the Next.js ``listingDetails`` object; its
+shape is visible in ``parse_next_data()``. The two schemas differ enough
+that each parser is maintained separately rather than being unified.
+
+==============================================================================
+  Running
+==============================================================================
+
+    source venv/bin/activate
     pip install selenium webdriver-manager beautifulsoup4 pandas
+    python bmw_x3_scraper.py
 
-Note: AutoTrader may update their site or deploy anti‑bot measures.  If you
-encounter issues, consider adding random delays, rotating user agents or
-using a proxy.  Always consult the website’s terms of service before
-scraping.
+Requires Chrome for Testing installed at
+``/Applications/Google Chrome for Testing.app`` (see ``create_driver``).
+CSV output is append-only with last-seen and soft-deletion tracking
+(``last_scrape_timestamp``, ``is_deleted``). Duplicates are removed by
+``(ad_id, dealer_co_id)`` before write.
+
+If you revisit this code after a long absence and things break:
+  1. Check ``investigation_notes.md`` for the latest known routing behaviour.
+  2. Load a search URL in a real browser and check which globals exist
+     (``__NEXT_DATA__`` vs ``ngVdpModel``), and whether the listing-link
+     format has changed.
+  3. If AutoTrader has introduced a THIRD app, add a Tier 1c parser
+     alongside the existing two rather than replacing either.
+  4. AutoTrader may also deploy anti-bot measures. If you hit CAPTCHAs, try
+     random delays, rotating user agents, or a residential proxy. The
+     ``_collect_page_links`` helper already detects and pauses for manual
+     CAPTCHA resolution when the page returns very few anchors.
 """
 
 # ── Scraper settings ─────────────────────────────────────────────────────
@@ -252,6 +314,7 @@ def get_listing_urls(driver: webdriver.Chrome, search_url: str,
     If *first_page_loaded* is True, collects links from the current page
     first before advancing to page 2.
     """
+    RESULTS_PER_PAGE = 100  # matches rcp=100 in COMMON_PARAMS
     all_links: Set[str] = set()
     page = 1
     while True:
@@ -267,6 +330,9 @@ def get_listing_urls(driver: webdriver.Chrome, search_url: str,
             break
         all_links.update(new_links)
         log(f"  Page {page}: {len(new_links)} new URLs (total: {len(all_links)})")
+        # If this page returned fewer than a full page, there is no next page.
+        if len(page_links) < RESULTS_PER_PAGE:
+            break
         page += 1
     return list(all_links)
 
@@ -429,6 +495,222 @@ def parse_next_data(data: Dict[str, Any]) -> VehicleListing:
     )
 
     return listing
+
+
+def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
+    """Parse a vehicle detail page from AutoTrader's LEGACY Angular app.
+
+    The legacy Angular detail page injects a ``window.ngVdpModel`` object
+    with the full listing data. This parser was the scraper's only data
+    source until commit e97c882 (2026 migration to ``__NEXT_DATA__``) and
+    was resurrected on 2026-04-15 when we discovered the Angular app is
+    still very much alive and actively serves traffic. See the module
+    docstring and ``investigation_notes.md`` for context.
+
+    The sample schema in ``gu.json`` documents the nested structure this
+    function navigates. Key top-level objects used here:
+
+      * ``adBasicInfo``    - ad ID, dealer ID, VIN, odometer, price, adType
+      * ``hero``           - title, make, model, year, location, mileage
+      * ``priceAnalysis``  - price position vs market, average market price
+      * ``conditionAnalysis`` - odometer condition rating
+      * ``dealerTrust``    - dealer company name, cityProvinceName, map URL
+      * ``description``    - listing description (structured, needs unwrap)
+      * ``specifications`` - array of ``{key, value}`` spec pairs
+      * ``featureHighlights`` - list of marketing highlights
+      * ``carInsurance``   - carries VIN fallback
+      * ``vehicle``        - legacy container, used as secondary fallback
+
+    This schema differs enough from the Next.js ``listingDetails`` object
+    (parsed by ``parse_next_data``) that we keep the two parsers separate
+    rather than trying to unify them. Both populate the same
+    ``VehicleListing`` dataclass so downstream CSV code doesn't care which
+    path produced a given row.
+
+    Missing fields remain ``None`` - not every listing has every field.
+    """
+    listing = VehicleListing()
+    ad_basic = data.get("adBasicInfo", {})
+    hero = data.get("hero", {})
+    seller = data.get("seller", {})
+    price_analysis = data.get("priceAnalysis", {})
+    condition_analysis = data.get("conditionAnalysis", {})
+    dealer_trust = data.get("dealerTrust", {})
+    vehicle = data.get("vehicle", {})
+
+    # Title: prefer hero.title, fallback to vehicle.title or build from parts.
+    title = hero.get("title") or vehicle.get("title")
+    if not title:
+        year = hero.get("year") or vehicle.get("year")
+        make = hero.get("make") or vehicle.get("make")
+        model = hero.get("model") or vehicle.get("model")
+        title = " ".join(str(part) for part in (year, make, model) if part)
+    listing.title = title
+
+    listing.make = hero.get("make") or ad_basic.get("make")
+    listing.trim = hero.get("trim") or ad_basic.get("trim")
+    year_val = hero.get("year") or vehicle.get("year")
+    if year_val is not None:
+        try:
+            listing.year = int(year_val)
+        except (ValueError, TypeError):
+            listing.year = None
+
+    mileage_km = (
+        hero.get("mileage")
+        or ad_basic.get("odometer")
+        or vehicle.get("mileage")
+    )
+    if mileage_km is not None:
+        try:
+            listing.mileage_km = int(mileage_km)
+        except (ValueError, TypeError):
+            listing.mileage_km = int(re.sub(r"[^0-9]", "", str(mileage_km)))
+
+    price_val = (
+        hero.get("price")
+        or ad_basic.get("price")
+        or vehicle.get("price")
+    )
+    if price_val:
+        try:
+            listing.price_cad = int(price_val)
+        except (ValueError, TypeError):
+            listing.price_cad = int(re.sub(r"[^0-9]", "", str(price_val)))
+
+    listing.status = (
+        data.get("status")
+        or hero.get("status")
+        or vehicle.get("condition")
+        or ad_basic.get("adType")
+    )
+
+    # Seller name comes from dealerCoName on dealer ads; fall back through
+    # the various objects that have historically carried it across schema
+    # revisions.
+    listing.seller_name = (
+        ad_basic.get("dealerCoName")
+        or dealer_trust.get("dealerCompanyName")
+        or seller.get("name")
+        or seller.get("seller_name")
+    )
+    listing.is_private_seller = ad_basic.get(
+        "isPrivate",
+        seller.get("is_private_seller", seller.get("isPrivateSeller")),
+    )
+    listing.city = hero.get("location")
+    city_province_name = dealer_trust.get("cityProvinceName")
+    if city_province_name and "," in city_province_name:
+        listing.province = city_province_name.split(",")[1].strip()
+
+    # Specifications come as a list of {key, value} dicts; flatten to dict.
+    specs = {
+        spec.get("key"): spec.get("value")
+        for spec in data.get("specifications", {}).get("specs", [])
+    }
+    listing.exterior_colour = (
+        hero.get("exterior_colour")
+        or hero.get("exteriorColour")
+        or vehicle.get("exteriorColour")
+        or specs.get("Exterior Colour")
+    )
+    listing.fuel_type = (
+        hero.get("fuel_type")
+        or hero.get("fuelType")
+        or vehicle.get("fuelType")
+        or specs.get("Fuel Type")
+    )
+
+    # ``description`` may be a nested object ``{description: [{description: str}]}``
+    # or a plain string depending on the listing. Unwrap defensively.
+    desc_obj = data.get("description", {})
+    if isinstance(desc_obj, dict):
+        desc_list = desc_obj.get("description")
+        if isinstance(desc_list, list) and desc_list and isinstance(desc_list[0], dict):
+            listing.description = desc_list[0].get("description")
+        else:
+            listing.description = str(desc_obj) if desc_obj else None
+    else:
+        listing.description = desc_obj
+    if listing.description:
+        # Collapse whitespace so CSV rows stay single-line.
+        listing.description = " ".join(listing.description.split())
+
+    listing.ad_id = ad_basic.get("adId")
+    listing.dealer_co_id = ad_basic.get("dealerCoId")
+    car_insurance = data.get("carInsurance", {})
+    listing.vin = (
+        hero.get("vin")
+        or ad_basic.get("vin")
+        or car_insurance.get("vin")
+        or vehicle.get("vin")
+    )
+    listing.price_analysis_description = (
+        hero.get("priceAnalysisDescription")
+        or price_analysis.get("priceAnalysisDescription")
+    )
+    avg_market_price_str = price_analysis.get("averageMarketPrice")
+    if avg_market_price_str:
+        try:
+            cleaned_price = int(re.sub(r"[^0-9]", "", str(avg_market_price_str)))
+            listing.average_market_price = cleaned_price
+            if listing.price_cad is not None:
+                listing.price_vs_market = listing.price_cad - cleaned_price
+        except (ValueError, TypeError):
+            pass
+
+    listing.odometer_condition = condition_analysis.get("odometerCondition")
+    listing.google_map_url = dealer_trust.get("googleMapUrl")
+    listing.price_position = price_analysis.get("currentAskingPricePosition")
+    listing.price_evaluation = price_analysis.get("priceEvaluation")
+
+    # Feature flags are derived heuristically from text + structured highlights.
+    # Same approach as parse_next_data so both parsers produce comparable rows.
+    desc_text = (listing.description or "").lower()
+    title_text = (listing.title or "").lower()
+    highlights = [
+        h.lower() for h in
+        data.get("featureHighlights", {}).get("highlights", [])
+    ]
+    listing.has_driver_assistance = (
+        "eyesight" in desc_text or "driving assistant" in desc_text
+        or "assistant de conduite" in desc_text
+    )
+    listing.has_carplay = (
+        "carplay" in desc_text or "carplay" in title_text
+        or any("carplay" in h for h in highlights)
+    )
+    listing.has_cruise = (
+        "cruise control" in desc_text or "cruise" in title_text
+        or any("cruise" in h for h in highlights)
+    )
+
+    # In the Angular schema, ``model`` is not reliably populated as a standalone
+    # field, so derive it from trim or title as the old scraper did.
+    listing.model = listing.trim or listing.title
+
+    return listing
+
+
+# ============================================================================
+#  extract_listing_details - dual-path dispatcher
+# ============================================================================
+#
+# Tries each parser in order of preference. Because AutoTrader A/B-routes
+# between the Next.js and Angular apps (see module docstring), we don't know
+# in advance which data source a detail page will expose, and a single
+# scraping run may hit a mix. The dispatcher tries them all and returns on
+# the first success.
+#
+# Tier ordering rationale:
+#   1a. __NEXT_DATA__   : richer schema (more specs, WLTP, equipment lists)
+#   1b. ngVdpModel      : legacy but complete; covers Angular sessions
+#   2.  BeautifulSoup on embedded <script id="__NEXT_DATA__">
+#                       : salvages Next.js pages when JS didn't hydrate
+#   3.  BeautifulSoup on raw HTML
+#                       : last-ditch for when both JS globals are missing;
+#                         extracts title / mileage / price / seller only.
+# ============================================================================
 
 
 def extract_listing_details(driver: webdriver.Chrome, url: str) -> VehicleListing:
@@ -663,6 +945,15 @@ def generate_scatter_html(csv_file: str, output_file: str,
     today = datetime.now().date()
     yesterday = today - __import__("datetime").timedelta(days=1)
 
+    MODEL_DISPLAY = {
+        "CR-V": "CR-V",
+        "HR-V": "HR-V",
+        "KONA": "Kona",
+        "Forester": "Forester",
+        "OUTBACK": "Outback",
+        "RAV 4": "RAV4",
+    }
+
     records = []
     for _, row in df.iterrows():
         # Determine freshness tier
@@ -682,8 +973,14 @@ def generate_scatter_html(csv_file: str, output_file: str,
         else:
             freshness = "old"
 
+        model_raw = row["model"] if pd.notna(row.get("model")) else ""
+        model_display = MODEL_DISPLAY.get(model_raw)
+        if not model_display:
+            continue
+
         records.append({
             "make": row["make"],
+            "model": model_display,
             "year": int(row["year"]) if pd.notna(row["year"]) else 0,
             "mileage_km": int(row["mileage_km"]) if pd.notna(row["mileage_km"]) else 0,
             "price_cad": int(row["price_cad"]) if pd.notna(row["price_cad"]) else 0,
@@ -748,10 +1045,12 @@ def generate_scatter_html(csv_file: str, output_file: str,
 <body>
 
 <div class="controls">
-  <label><input type="checkbox" checked data-make="Subaru"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Subaru</label>
-  <label><input type="checkbox" checked data-make="Toyota"> <svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Toyota</label>
-  <label><input type="checkbox" checked data-make="Honda"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Honda</label>
-  <label><input type="checkbox" checked data-make="Hyundai"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Hyundai</label>
+  <label><input type="checkbox" checked data-model="Forester"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Forester</label>
+  <label><input type="checkbox" checked data-model="Outback"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Outback</label>
+  <label><input type="checkbox" checked data-model="RAV4"> <svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> RAV4</label>
+  <label><input type="checkbox" checked data-model="HR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> HR-V</label>
+  <label><input type="checkbox" checked data-model="CR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> CR-V</label>
+  <label><input type="checkbox" checked data-model="Kona"> <svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Kona</label>
 </div>
 
 <div class="chart-wrap">
@@ -779,19 +1078,20 @@ def generate_scatter_html(csv_file: str, output_file: str,
 </div>
 
 <script>
-const SHAPES = { Subaru: 'circle', Toyota: 'triangle', Honda: 'rect', Hyundai: 'rectRot' };
+const SHAPES = { 'Forester': 'circle', 'Outback': 'rectRot', 'RAV4': 'triangle', 'HR-V': 'rect', 'CR-V': 'rectRounded', 'Kona': 'star' };
 const COLORS = { latest: '#ffd700', recent: '#2ecc71', old: '#7f8c8d' };
 const SIZES  = { latest: { r: 7, hr: 9, bw: 0 }, recent: { r: 7, hr: 9, bw: 0 }, old: { r: 7, hr: 9, bw: 0 } };
 
 const data = ''' + json_data + ''';
 
 const datasets = {};
-Object.keys(SHAPES).forEach(make => {
-  datasets[make] = { label: make, data: [], meta: [], backgroundColor: [], borderColor: [], pointRadius: [], pointHoverRadius: [], pointBorderColor: [], pointBorderWidth: [], pointStyle: SHAPES[make], showLine: false };
+Object.keys(SHAPES).forEach(model => {
+  datasets[model] = { label: model, data: [], meta: [], backgroundColor: [], borderColor: [], pointRadius: [], pointHoverRadius: [], pointBorderColor: [], pointBorderWidth: [], pointStyle: SHAPES[model], showLine: false };
 });
 
 data.forEach(d => {
-  const ds = datasets[d.make];
+  const ds = datasets[d.model];
+  if (!ds) return;
   ds.data.push({ x: d.mileage_km, y: d.price_cad });
   ds.meta.push(d);
   const f = d.freshness || 'old';
@@ -801,7 +1101,7 @@ data.forEach(d => {
   ds.pointRadius.push(s.r);
   ds.pointHoverRadius.push(s.hr);
   ds.pointBorderColor.push(c);
-  ds.pointBorderWidth.push(0);
+  ds.pointBorderWidth.push(SHAPES[d.model] === 'star' ? 2 : 0);
 });
 
 Chart.register(ChartDataLabels);
@@ -931,7 +1231,7 @@ const chart = new Chart(ctx, {
         font: { size: 9 },
         formatter(value, ctx) {
           const item = ctx.dataset.meta[ctx.dataIndex];
-          return item.make + '\\n' + item.year;
+          return item.model + '\\n' + item.year;
         }
       }
     },
@@ -964,7 +1264,7 @@ const chart = new Chart(ctx, {
 
 document.querySelectorAll('.controls input').forEach(cb => {
   cb.addEventListener('change', () => {
-    const idx = chart.data.datasets.findIndex(ds => ds.label === cb.dataset.make);
+    const idx = chart.data.datasets.findIndex(ds => ds.label === cb.dataset.model);
     if (idx >= 0) { chart.setDatasetVisibility(idx, cb.checked); chart.update(); }
   });
 });
@@ -999,47 +1299,30 @@ def main() -> None:
         except (pd.errors.EmptyDataError, KeyError, ValueError):
             pass
 
-    # Retry with fresh browser sessions until we land on the Next.js app.
-    # AutoTrader A/B-routes ~40% of sessions to the new platform (post
-    # AutoScout24 acquisition) and ~60% to the legacy Angular app which
-    # serves /a/ URLs that can no longer be scraped.
+    # AutoTrader A/B-routes between the Next.js app (/offers/ URLs,
+    # __NEXT_DATA__) and the legacy Angular app (/a/ URLs, ngVdpModel).
+    # Both are fully scrapeable, so we accept whichever we land on.
     first_search_url = (
         f"https://www.autotrader.ca/cars/{VEHICLES[0]}/qc/montr%c3%a9al/"
         + COMMON_PARAMS
     )
-    driver = None
-    for attempt in range(10):
-        driver = create_driver(headless=False)
-        log("Warming up session...")
-        driver.get("https://www.autotrader.ca/")
-        time.sleep(5)
-        # Accept cookies during warm-up
-        try:
-            consent_btn = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//button[contains(text(), 'Accept')]")
-                )
+    driver = create_driver(headless=False)
+    log("Warming up session...")
+    driver.get("https://www.autotrader.ca/")
+    time.sleep(5)
+    try:
+        consent_btn = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//button[contains(text(), 'Accept')]")
             )
-            consent_btn.click()
-            log("Cookies accepted during warm-up")
-            time.sleep(1)
-        except Exception:
-            pass
-        # Load first search page and check for Next.js
-        driver.get(first_search_url)
-        time.sleep(8)
-        has_next = driver.execute_script(
-            "return typeof window.__NEXT_DATA__ !== 'undefined'"
         )
-        if has_next:
-            log(f"Next.js app detected (attempt {attempt + 1})")
-            break
-        log(f"Old Angular app detected (attempt {attempt + 1}), retrying...")
-        driver.quit()
-        driver = None
-    else:
-        log("ERROR: Could not get Next.js app after 10 attempts. Exiting.")
-        return
+        consent_btn.click()
+        log("Cookies accepted during warm-up")
+        time.sleep(1)
+    except Exception:
+        pass
+    driver.get(first_search_url)
+    time.sleep(8)
 
     try:
         # First vehicle is already loaded — scrape it directly
