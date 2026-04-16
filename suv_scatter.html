@@ -107,7 +107,7 @@ function rebuild() {
     ds.pointRadius.push(s.r);
     ds.pointHoverRadius.push(s.hr);
     ds.pointBorderColor.push(c);
-    ds.pointBorderWidth.push(SHAPES[d.model] === 'star' ? 2 : 0);
+    ds.pointBorderWidth.push(['star', 'cross'].includes(SHAPES[d.model]) ? 2 : 0);
   });
 }
 rebuild();
