@@ -1220,7 +1220,7 @@ function rebuild() {
     ds.pointRadius.push(s.r);
     ds.pointHoverRadius.push(s.hr);
     ds.pointBorderColor.push(c);
-    ds.pointBorderWidth.push(SHAPES[d.model] === 'star' ? 2 : 0);
+    ds.pointBorderWidth.push(['star', 'cross'].includes(SHAPES[d.model]) ? 2 : 0);
   });
 }
 rebuild();
@@ -1418,7 +1418,7 @@ def _parse_args():
                    help="Scrape only one vehicle slug (e.g. 'subaru/forester').")
     p.add_argument("--generate-html-only", action="store_true",
                    help="Skip scraping — just regenerate the HTML plot from the existing CSV.")
-    p.add_argument("--no-push", action="store_true",
+    p.add_argument("--no-publish", action="store_true",
                    help="Do not commit/push the HTML to GitHub Pages.")
     return p.parse_args()
 
@@ -1508,44 +1508,40 @@ def main() -> None:
     """
     args = _parse_args()
 
-    if args.generate_html_only:
-        generate_scatter_html(OUTPUT_FILE, SCATTER_HTML)
-        log("Scatter plot updated (generate-html-only)")
-        return
+    if not args.generate_html_only:
+        scrape_time = datetime.now().isoformat()
+        scrape_num = 1
+        if os.path.exists(OUTPUT_FILE):
+            try:
+                existing_df = pd.read_csv(OUTPUT_FILE)
+                if "scrape_number" in existing_df.columns:
+                    scrape_num = int(existing_df["scrape_number"].max()) + 1
+            except (pd.errors.EmptyDataError, KeyError, ValueError):
+                pass
 
-    scrape_time = datetime.now().isoformat()
-    scrape_num = 1
-    if os.path.exists(OUTPUT_FILE):
-        try:
-            existing_df = pd.read_csv(OUTPUT_FILE)
-            if "scrape_number" in existing_df.columns:
-                scrape_num = int(existing_df["scrape_number"].max()) + 1
-        except (pd.errors.EmptyDataError, KeyError, ValueError):
-            pass
+        if args.make_model:
+            if args.make_model not in VEHICLES:
+                log(f"Unknown make-model: {args.make_model}. Valid: {VEHICLES}")
+                return
+            vehicles = [args.make_model]
+        else:
+            vehicles = list(VEHICLES)
 
-    if args.make_model:
-        if args.make_model not in VEHICLES:
-            log(f"Unknown make-model: {args.make_model}. Valid: {VEHICLES}")
-            return
-        vehicles = [args.make_model]
-    else:
-        vehicles = list(VEHICLES)
+        if args.source in ("autotrader", "all"):
+            _scrape_autotrader(vehicles, scrape_num, scrape_time)
+        if args.source in ("facebook", "all"):
+            max_listings = args.limit if args.limit is not None else 200
+            _scrape_facebook(vehicles, scrape_num, scrape_time,
+                             max_listings=max_listings, days_override=args.days)
 
-    if args.source in ("autotrader", "all"):
-        _scrape_autotrader(vehicles, scrape_num, scrape_time)
-    if args.source in ("facebook", "all"):
-        max_listings = args.limit if args.limit is not None else 200
-        _scrape_facebook(vehicles, scrape_num, scrape_time,
-                         max_listings=max_listings, days_override=args.days)
-
-    removed = collapse_cross_source_duplicates(OUTPUT_FILE)
-    if removed:
-        log(f"Collapsed {removed} cross-source/same-car duplicate(s)")
+        removed = collapse_cross_source_duplicates(OUTPUT_FILE)
+        if removed:
+            log(f"Collapsed {removed} cross-source/same-car duplicate(s)")
 
     generate_scatter_html(OUTPUT_FILE, SCATTER_HTML)
     log("Scatter plot updated")
 
-    if args.no_push:
+    if args.no_publish:
         return
     try:
         subprocess.run(["git", "add", SCATTER_HTML], check=True, capture_output=True)
