@@ -803,6 +803,7 @@ OUTPUT_FILE = "used_suv_listings.csv"
 VEHICLES = [
     "subaru/forester",
     "subaru/outback",
+    "subaru/crosstrek",
     "toyota/rav4",
     "honda/hr-v",
     "honda/cr-v",
@@ -816,8 +817,9 @@ VEHICLES = [
 #   year_range:       (min, max) year kept
 FB_QUERIES: Dict[str, Dict[str, Any]] = {
     "subaru/forester": {"query": "subaru forester",  "regex": r"forester",   "model_canonical": "Forester", "year_range": (2016, 2099)},
-    "subaru/outback":  {"query": "subaru outback",   "regex": r"outback",    "model_canonical": "OUTBACK",  "year_range": (2016, 2099)},
-    "toyota/rav4":     {"query": "toyota rav4",      "regex": r"rav[\s-]?4", "model_canonical": "RAV 4",    "year_range": (2016, 2099)},
+    "subaru/outback":   {"query": "subaru outback",   "regex": r"outback",    "model_canonical": "OUTBACK",    "year_range": (2016, 2099)},
+    "subaru/crosstrek": {"query": "subaru crosstrek", "regex": r"crosstrek",  "model_canonical": "Crosstrek", "year_range": (2016, 2099)},
+    "toyota/rav4":      {"query": "toyota rav4",      "regex": r"rav[\s-]?4", "model_canonical": "RAV 4",     "year_range": (2016, 2099)},
     "honda/hr-v":      {"query": "honda hr-v",       "regex": r"hr[\s-]?v",  "model_canonical": "HR-V",     "year_range": (2016, 2099)},
     "honda/cr-v":      {"query": "honda cr-v",       "regex": r"cr[\s-]?v",  "model_canonical": "CR-V",     "year_range": (2016, 2099)},
     "hyundai/kona":    {"query": "hyundai kona",     "regex": r"kona",       "model_canonical": "KONA",     "year_range": (2016, 2099)},
@@ -829,7 +831,6 @@ COMMON_PARAMS = (
     "&priceto=15000"    # max price (AutoScout24 param)
     "&prx=300"          # radius in km
     "&loc=H1X%203J1"    # postal code
-    "&body=SUV"         # body type
     "&sts=Used"         # used vehicles only
 )
 
@@ -1050,6 +1051,7 @@ def generate_scatter_html(csv_file: str, output_file: str,
         "CR-V": "CR-V",
         "HR-V": "HR-V",
         "KONA": "Kona",
+        "Crosstrek": "Crosstrek",
         "Forester": "Forester",
         "OUTBACK": "Outback",
         "RAV 4": "RAV4",
@@ -1154,6 +1156,7 @@ def generate_scatter_html(csv_file: str, output_file: str,
   <label><input type="checkbox" checked data-model="HR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> HR-V</label>
   <label><input type="checkbox" checked data-model="CR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> CR-V</label>
   <label><input type="checkbox" checked data-model="Kona"> <svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Kona</label>
+  <label><input type="checkbox" checked data-model="Crosstrek"> <svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> Crosstrek</label>
   <span style="opacity:0.35">|</span>
   <label><input type="checkbox" checked data-source="autotrader"> AutoTrader</label>
   <label><input type="checkbox" checked data-source="facebook"> Facebook</label>
@@ -1185,7 +1188,7 @@ def generate_scatter_html(csv_file: str, output_file: str,
 </div>
 
 <script>
-const SHAPES = { 'Forester': 'circle', 'Outback': 'rectRot', 'RAV4': 'triangle', 'HR-V': 'rect', 'CR-V': 'rectRounded', 'Kona': 'star' };
+const SHAPES = { 'Forester': 'circle', 'Outback': 'rectRot', 'RAV4': 'triangle', 'HR-V': 'rect', 'CR-V': 'rectRounded', 'Kona': 'star', 'Crosstrek': 'cross' };
 const COLORS = { latest: '#ffd700', recent: '#2ecc71', old: '#7f8c8d' };
 const SIZES  = { latest: { r: 7, hr: 9, bw: 0 }, recent: { r: 7, hr: 9, bw: 0 }, old: { r: 7, hr: 9, bw: 0 } };
 const SOURCE_LABELS = { autotrader: 'AutoTrader', facebook: 'Facebook' };
@@ -1410,7 +1413,7 @@ def _parse_args():
     p.add_argument("--limit", type=int, default=None,
                    help="Max listings per vehicle (applied to FB; useful for testing).")
     p.add_argument("--days", type=int, default=None,
-                   help="Override daysSinceListed (FB only). Default: computed from last-scrape state, max 30.")
+                   help="Override daysSinceListed (FB only). Default: computed from last-scrape state, max 365.")
     p.add_argument("--make-model", dest="make_model", default=None,
                    help="Scrape only one vehicle slug (e.g. 'subaru/forester').")
     p.add_argument("--generate-html-only", action="store_true",
