@@ -1377,9 +1377,8 @@ const chart = new Chart(ctx, {
       showTooltip(item, e.native.clientX, e.native.clientY);
     },
     onHover(e, elements) {
-      const tt = document.getElementById('tooltip');
-      if (!elements.length) { if (!('ontouchstart' in window)) { tt.style.display = 'none'; selectedKey = null; } return; }
       if ('ontouchstart' in window) return;
+      if (!elements.length) return;
       const el = elements[0];
       const ds = chart.data.datasets[el.datasetIndex];
       const item = ds.meta[el.index];
