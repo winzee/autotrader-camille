@@ -115,7 +115,7 @@ import os
 import subprocess
 from typing import List, Dict, Any, Optional, Set, Tuple
 
-from bs4 import BeautifulSoup  # type: ignore
+from bs4 import BeautifulSoup, Tag  # type: ignore
 import pandas as pd  # type: ignore
 
 from selenium import webdriver  # type: ignore
@@ -752,7 +752,7 @@ def extract_listing_details(driver: webdriver.Chrome, url: str) -> VehicleListin
     try:
         soup = BeautifulSoup(driver.page_source, "html.parser")
         script_tag = soup.find("script", id="__NEXT_DATA__")
-        if script_tag and script_tag.string:
+        if isinstance(script_tag, Tag) and script_tag.string:
             next_data = json.loads(script_tag.string)
             details = (next_data.get("props", {})
                        .get("pageProps", {})
@@ -1000,12 +1000,15 @@ def collapse_cross_source_duplicates(csv_file: str) -> int:
     for idx in drop_idx:
         drop_row = cand.loc[idx]
         key = tuple(drop_row[c] for c in key_cols_k)
+        kept_row: Optional[pd.Series] = None
         try:
-            kept_row = keep_by_key.loc[key]
-            if isinstance(kept_row, pd.DataFrame):
-                kept_row = kept_row.iloc[0]
+            looked_up = keep_by_key.loc[key]
+            if isinstance(looked_up, pd.DataFrame):
+                kept_row = looked_up.iloc[0]
+            elif isinstance(looked_up, pd.Series):
+                kept_row = looked_up
         except KeyError:
-            kept_row = None
+            pass
         make, model = drop_row["make"], drop_row["model"]
         year, km, price = int(drop_row["year"]), int(drop_row["mileage_km"]), int(drop_row["price_cad"])
         dropped_src = str(drop_row.get("source") or "?")
