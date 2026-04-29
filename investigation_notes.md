@@ -111,3 +111,57 @@ Instead of retrying until Next.js, the scraper should:
 4. Merge both paths into the same `VehicleListing` output.
 
 The `parse_ngvdp_model()` code path likely still exists in git history (pre-`e97c882`) and can be resurrected.
+
+---
+
+# 2026-04-29 — Undercoverage diagnosis & dual-path fix
+
+## Symptom
+
+User reported "scrape is returning less and less data" over the prior days. Spot-check of `used_suv_listings.csv` showed:
+
+- Today's scrape touched ~48 of the 211 non-deleted AT rows; CR-V alone had 65 live listings on AT but the CSV held only 26.
+- Toyota RAV4 had been getting 0 results for 5 of the last 6 scrapes despite 27 live listings on AT.
+- **233 of 260 rows had `is_deleted` set** — almost certainly mostly false positives. (Earlier analysis missed this because the column is checked as a timestamp, not a boolean — see CLAUDE.md gotchas.)
+
+## Root causes (3 compounding bugs)
+
+1. **URL collector hard-coded to Next.js URLs.** `_collect_page_links()` used a single selector `a[href*='/offers/']`. AT has been routing 100% to Angular since at least 04-15 (see Exp 4 / Exp 5 above). On Angular sessions the selector found 0 listing URLs, so the scrape did nothing. The rare Next.js sessions kept the CSV from going completely stale.
+2. **Detail-extraction dispatcher never called the Angular parser.** `extract_listing_details()` only tried `__NEXT_DATA__`, even though `parse_ngvdp_model()` was fully implemented and the docstring claimed both tiers existed. Even if Angular URLs had been collected, detail scraping would have failed.
+3. **Slug matcher couldn't handle digit-suffixed models.** `vehicle_mask` and the URL post-filter compared against `toyota-rav4`, but real RAV4 URLs are spelled `toyota-rav-4-…`. RAV4 listings were therefore never matched by the deletion logic, never updated by `last_scrape_timestamp`, and never resurrectable.
+
+## Deletion-logic gaps
+
+- Existing safeguard refused to mark deletions only when the scrape returned **literally zero** URLs. A scrape returning 1 URL out of 25 expected would still mark the other 24 as deleted.
+- No resurrection path: once `is_deleted` was set, it never cleared, even if the same URL reappeared in a later scrape.
+
+## Fixes applied (`bmw_x3_scraper.py`)
+
+- `LISTING_SELECTORS` now collects both `a[href*='/offers/']` and `a[href*='/a/']`.
+- `extract_listing_details()` gained Tier 1b: `window.ngVdpModel` → `parse_ngvdp_model()`.
+- New `_make_model_url_patterns(make_model)` generates both URL flavours plus the letter-digit hyphenated alt spelling (`rav4` ↔ `rav-4`). Used by both the URL post-filter and the `vehicle_mask` regex.
+- Deletion now requires a **healthy scrape**: ≥5 URLs scraped AND (≥50% of expected re-found OR fewer than 3 baseline rows).
+- **Resurrection**: any URL with `is_deleted` set that reappears in a healthy scrape gets cleared back to `NaN`.
+- Per-run logs added under `logs/` via `setup_run_log()` (tees stdout+stderr).
+
+## End-to-end verification
+
+Full scrape run 12:59–13:15 (logged at `logs/run_2026-04-29_125936.log`):
+
+- All 7 AT vehicles completed cleanly. URL counts per vehicle: 19–20 each.
+- **RAV4: 20 URLs (was 0)**. Slug fix confirmed.
+- **38 false-positive deletions resurrected** across the 7 vehicles. Distribution: Forester 5, Outback 6, Crosstrek 7, RAV4 0, HR-V 6, CR-V 4, Kona 10.
+- Health-based safeguard correctly fired on RAV4 (re-found 2 of 6 expected) and skipped deletion marking.
+- Active row count: 27 → 65. Total rows: 260 → 261.
+
+## Newly visible / still-open issues
+
+These were masked by the bugs above and showed up clearly once the scraper was finding URLs again:
+
+1. **AT search leaks Ontario dealers.** Of 89 new listings extracted in this run, only 2 had `province == "QC"`; the rest were Toronto-area dealers (Vaughan, North York, Burlington, Brampton). They're correctly dropped by the QC filter at write time, but a lot of detail-page work is wasted. URL-level filter on `/ontario/` doesn't catch them because slugs don't contain provinces. **Fix idea:** check `data.location.zip` or `seller.dealer.region` *before* writing, and skip non-QC earlier; or add a city/zip allowlist.
+2. **`rcp=100` ignored, pagination unreliable.** Every vehicle returned ~20 URLs regardless of `rcp`. Live AT shows 27–65 listings per vehicle (CR-V 65, RAV4 27). So even on the corrected scraper we're capturing only the first ~20–30%. Combined with #1, the QC subset is even smaller. **Investigation needed:** does Angular respect `rcp`? Does `&page=2` work mid-session? Can we issue separate searches per QC city to bypass the radius/pagination trap?
+
+## Operational notes
+
+- Pre-run CSV backups land at `used_suv_listings.pre_scrape_<timestamp>.csv` when a session-runner makes one — useful for diff-based audits.
+- Memory note: `is_deleted` column holds an ISO timestamp string, not a boolean. Any quick `csv` analysis must use `notna()`/`isna()` semantics, not equality with `'true'`.

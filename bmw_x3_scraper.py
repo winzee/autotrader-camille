@@ -104,6 +104,7 @@ LISTING_PAUSE_SECS = 5   # Pause between each listing scrape
 
 import json
 import re
+import sys
 import time
 from datetime import datetime as _dt
 
@@ -113,7 +114,59 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 import os
 import subprocess
-from typing import List, Dict, Any, Optional, Set, Tuple
+from typing import List, Dict, Any, Optional, Set, Tuple, IO
+
+
+# ── Run-log tee ──────────────────────────────────────────────────────────
+# Mirror stdout/stderr to a per-run file under ``logs/`` so prior runs can be
+# inspected after the fact (useful for diagnosing low-yield scrapes, CAPTCHA
+# events, or detail-page parser failures). Activated from ``main()``.
+LOG_DIR = "logs"
+
+
+class _Tee:
+    """Write-through proxy that fans every write to multiple streams."""
+
+    def __init__(self, *streams: IO[str]) -> None:
+        self._streams = streams
+
+    def write(self, data: str) -> int:
+        for s in self._streams:
+            try:
+                s.write(data)
+            except Exception:
+                pass
+        return len(data)
+
+    def flush(self) -> None:
+        for s in self._streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+    def isatty(self) -> bool:
+        return any(getattr(s, "isatty", lambda: False)() for s in self._streams)
+
+
+def setup_run_log() -> Optional[str]:
+    """Tee stdout and stderr to a timestamped file under ``logs/``.
+
+    Returns the absolute path of the log file, or ``None`` if setup fails
+    (logging to a file is best-effort and must never break the scrape).
+    """
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        path = os.path.join(LOG_DIR, _dt.now().strftime("run_%Y-%m-%d_%H%M%S.log"))
+        # Line-buffered so partial output is visible if the run is interrupted.
+        f = open(path, "a", buffering=1)
+        f.write(f"=== run started {_dt.now().isoformat()} ===\n")
+        sys.stdout = _Tee(sys.__stdout__, f)  # type: ignore[assignment]
+        sys.stderr = _Tee(sys.__stderr__, f)  # type: ignore[assignment]
+        return os.path.abspath(path)
+    except Exception as exc:
+        print(f"WARNING: could not set up run log: {exc}", flush=True)
+        return None
 
 from bs4 import BeautifulSoup, Tag  # type: ignore
 import pandas as pd  # type: ignore
@@ -261,8 +314,11 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
         time.sleep(1)
     except Exception:
         pass
-    # AutoTrader listing URLs use /offers/ (previously /a/)
-    LISTING_SELECTORS = ["a[href*='/offers/']"]
+    # AutoTrader listing URLs come in two flavours depending on which app the
+    # session was A/B-routed to: Next.js → /offers/, Angular → /a/. We collect
+    # both; scrape_vehicle() post-filters to URLs matching the expected
+    # make/model so we don't pick up navigation or related-vehicle anchors.
+    LISTING_SELECTORS = ["a[href*='/offers/']", "a[href*='/a/']"]
 
     # Wait for listing links to appear (up to 15s), retry on failure
     for attempt in range(3):
@@ -727,7 +783,7 @@ def extract_listing_details(driver: webdriver.Chrome, url: str) -> VehicleListin
     except Exception:
         return listing
 
-    # Tier 1: JavaScript extraction
+    # Tier 1a: __NEXT_DATA__ (Next.js detail page)
     try:
         WebDriverWait(driver, 10).until(
             lambda d: d.execute_script(
@@ -742,8 +798,24 @@ def extract_listing_details(driver: webdriver.Chrome, url: str) -> VehicleListin
         )
         listing = parse_next_data(data)
         listing.url = url
+        listing.source = "autotrader"
         log("  -> extracted via __NEXT_DATA__")
         return listing
+    except Exception:
+        pass
+
+    # Tier 1b: window.ngVdpModel (legacy Angular detail page)
+    try:
+        WebDriverWait(driver, 10).until(
+            lambda d: d.execute_script("return !!window.ngVdpModel")
+        )
+        data = driver.execute_script("return window.ngVdpModel")
+        if data:
+            listing = parse_ngvdp_model(data)
+            listing.url = url
+            listing.source = "autotrader"
+            log("  -> extracted via ngVdpModel")
+            return listing
     except Exception:
         pass
 
@@ -836,6 +908,33 @@ COMMON_PARAMS = (
 
 
 
+def _make_model_url_patterns(make_model: str) -> List[str]:
+    """Return the substrings that identify URLs for a given make_model slug.
+
+    AT's listing URLs come in two flavours (Next.js ``/offers/<make>-<model>-``
+    and Angular ``/a/<make>/<model>/``) and the ``<model>`` part can be spelled
+    differently from our search slug — most notably ``rav4`` vs ``rav-4``. We
+    generate both spellings so the scraper recognises every valid listing URL
+    and the deletion logic can correctly compare against the existing CSV.
+    """
+    mm_slash = make_model.lower()
+    mm_dash = make_model.replace("/", "-").lower()
+    patterns = {
+        f"/a/{mm_slash}/",
+        f"/offers/{mm_dash}-",
+        f"/offers/{mm_dash}/",
+    }
+    # Insert hyphen between letter and digit (rav4 -> rav-4) to catch the
+    # alternate URL spelling AT uses for digit-suffixed models.
+    mm_dash_alt = re.sub(r"([a-z])(\d)", r"\1-\2", mm_dash)
+    if mm_dash_alt != mm_dash:
+        patterns.add(f"/offers/{mm_dash_alt}-")
+        patterns.add(f"/offers/{mm_dash_alt}/")
+        mm_slash_alt = re.sub(r"([a-z])(\d)", r"\1-\2", mm_slash)
+        patterns.add(f"/a/{mm_slash_alt}/")
+    return sorted(patterns)
+
+
 def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
                    make_model: str, output_file: str,
                    scrape_num: int, scrape_time: str,
@@ -864,6 +963,11 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
     urls = get_listing_urls(driver, search_url, first_page_loaded=first_page_loaded)
     # Skip Ontario listings
     urls = [u for u in urls if "/ontario/" not in u.lower()]
+    # Restrict to URLs that actually belong to this make/model. The page-level
+    # /a/ selector picks up unrelated anchors (related vehicles, navigation,
+    # popular searches), so filter both URL flavours by the expected slug.
+    url_patterns = _make_model_url_patterns(make_model)
+    urls = [u for u in urls if any(p in u.lower() for p in url_patterns)]
     log(f"Found {len(urls)} vehicle URLs")
 
     scraped_url_set = set(urls)
@@ -895,26 +999,50 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
 
     # Update existing rows for this vehicle type
     if existing_df is not None and not existing_df.empty:
+        vehicle_url_pattern = "|".join(re.escape(p) for p in url_patterns)
         vehicle_mask = (
-            existing_df["url"].str.contains(f"/a/{make_model}/", na=False)
-            | existing_df["url"].str.contains(f"/offers/{make_model.replace('/', '-')}", na=False)
-        ) & (existing_df["source"] == "autotrader")
+            existing_df["url"].str.contains(vehicle_url_pattern, na=False, regex=True)
+            & (existing_df["source"] == "autotrader")
+        )
 
         # Update last_scrape_timestamp for listings still present
         still_present = vehicle_mask & existing_df["url"].isin(scraped_url_set)
         existing_df.loc[still_present, "last_scrape_timestamp"] = scrape_time
 
-        # Mark disappeared listings as deleted (only if not already deleted)
-        # Skip if scrape returned 0 URLs — that's a scrape failure, not real deletions
-        if scraped_url_set:
+        # Resurrection: if a previously-deleted URL reappears in this scrape,
+        # clear is_deleted so the row goes back to active. Protects us from
+        # earlier false-positive deletions caused by partial scrape failures.
+        if "is_deleted" in existing_df.columns:
+            resurrected = still_present & existing_df["is_deleted"].notna()
+            if resurrected.any():
+                log(f"Resurrecting {int(resurrected.sum())} listings that came back "
+                    f"(previously marked deleted)")
+                existing_df.loc[resurrected, "is_deleted"] = None
+
+        # Deletion safeguard. A scrape that returns very few URLs, or
+        # re-discovers only a small fraction of expected listings, is treated
+        # as a partial failure — we refuse to mark anything deleted on those
+        # runs to avoid false positives.
+        existing_active = int((vehicle_mask & existing_df["is_deleted"].isna()).sum())
+        seen_count = int(still_present.sum())
+        MIN_URLS_FOR_DELETION = 5
+        MIN_HEALTH_RATIO = 0.5
+        healthy_scrape = (
+            len(scraped_url_set) >= MIN_URLS_FOR_DELETION
+            and (existing_active < 3 or seen_count / existing_active >= MIN_HEALTH_RATIO)
+        )
+        if healthy_scrape:
             disappeared = (vehicle_mask
                            & ~existing_df["url"].isin(scraped_url_set)
                            & existing_df["is_deleted"].isna())
             if disappeared.any():
-                log(f"Marking {disappeared.sum()} listings as deleted")
+                log(f"Marking {int(disappeared.sum())} listings as deleted")
                 existing_df.loc[disappeared, "is_deleted"] = scrape_time
         else:
-            log("Skipping deletion marking — no URLs scraped (possible scrape failure)")
+            log(f"Skipping deletion marking — scrape looks unhealthy "
+                f"(scraped={len(scraped_url_set)}, "
+                f"re-found {seen_count}/{existing_active} expected). "
+                f"Treating as partial failure.")
 
         # Combine existing + new
         if not new_df.empty:
@@ -1509,6 +1637,10 @@ def main() -> None:
     (``rcs`` offsets) could be processed in a loop if required.
     """
     args = _parse_args()
+
+    log_path = setup_run_log()
+    if log_path:
+        log(f"Run log: {log_path}")
 
     if not args.generate_html_only:
         scrape_time = datetime.now().isoformat()

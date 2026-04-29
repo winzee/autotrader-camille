@@ -10,7 +10,8 @@
       "Bash(ls:*)",
       "Bash(gh gist:*)",
       "mcp__plugin_playwright_playwright__browser_evaluate",
-      "mcp__plugin_playwright_playwright__browser_navigate"
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "Bash(python3 -c ' *)"
     ]
   }
 }
