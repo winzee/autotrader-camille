@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Used AWD $3k–$9k — Émile's Search</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; height: 100dvh; }
+  body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; color: #eee; padding: 12px; display: flex; flex-direction: column; }
+  .heading { display: flex; align-items: baseline; justify-content: center; gap: 12px; margin-bottom: 6px; }
+  .heading h1 { font-size: 1.05rem; font-weight: 600; color: #eee; }
+  .heading .live-link { color: #3498db; font-size: 0.78rem; text-decoration: none; }
+  .heading .live-link:hover { text-decoration: underline; }
+  .controls { display: flex; justify-content: center; gap: 20px; margin-bottom: 8px; font-size: 0.9rem; }
+  .controls label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .controls svg { vertical-align: middle; }
+  .chart-wrap { flex: 1; min-height: 300px; position: relative; background: #16213e; border-radius: 12px; padding: 12px; }
+  canvas { cursor: pointer; }
+  #tooltip { position: fixed; background: #0f3460; border: 1px solid #555; border-radius: 8px; padding: 10px 14px; font-size: 0.82rem; pointer-events: auto; display: none; z-index: 10; line-height: 1.5; }
+  #tooltip .tt-title { font-weight: bold; }
+  #tooltip .tt-detail { color: #ccc; }
+  #tooltip .tt-color { color: #bbb; font-size: 0.78rem; }
+  #tooltip .tt-city { color: #999; }
+  #tooltip .tt-source { color: #999; font-size: 0.78rem; }
+  #tooltip .tt-extra { color: #aaa; font-size: 0.78rem; margin-top: 4px; white-space: pre-line; }
+  #tooltip .tt-buttons { display: flex; gap: 6px; margin-top: 6px; }
+  #tooltip .tt-open { display: inline-block; background: #e74c3c; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; text-decoration: none; }
+  #tooltip .tt-info-btn { display: inline-block; background: #2980b9; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.78rem; border: none; cursor: pointer; }
+  .info-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 100; display: none; justify-content: center; align-items: center; }
+  .info-popup { background: #16213e; border: 1px solid #555; border-radius: 12px; padding: 20px; max-width: 420px; width: 90%; max-height: 80vh; overflow-y: auto; position: relative; color: #eee; font-size: 0.85rem; line-height: 1.6; }
+  .info-popup .info-close { position: absolute; top: 8px; right: 12px; background: none; border: none; color: #aaa; font-size: 1.2rem; cursor: pointer; }
+  .info-popup .info-title { font-weight: bold; font-size: 1rem; margin-bottom: 10px; }
+  .info-popup .info-body div { margin-bottom: 4px; }
+  .info-popup .info-body a { color: #3498db; }
+  .info-popup .info-img { width: 100%; border-radius: 8px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<div class="heading">
+  <h1>Émile's AWD Search</h1>
+  <a class="live-link" href="https://winzee.github.io/autotrader-camille/emile_scatter.html" target="_blank">view live</a>
+</div>
+
+<div class="controls">
+  <label><input type="checkbox" checked data-model="Forester"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Forester</label>
+  <label><input type="checkbox" checked data-model="Outback"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Outback</label>
+  <label><input type="checkbox" checked data-model="RAV4"> <svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> RAV4</label>
+  <label><input type="checkbox" checked data-model="HR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> HR-V</label>
+  <label><input type="checkbox" checked data-model="CR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> CR-V</label>
+  <label><input type="checkbox" checked data-model="Kona"> <svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Kona</label>
+  <label><input type="checkbox" checked data-model="Crosstrek"> <svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> Crosstrek</label>
+  <span style="opacity:0.35">|</span>
+  <label><input type="checkbox" checked data-source="autotrader"> AutoTrader</label>
+  <label><input type="checkbox" checked data-source="facebook"> Facebook</label>
+</div>
+
+<div class="chart-wrap">
+  <canvas id="chart"></canvas>
+</div>
+
+<div id="tooltip">
+  <div class="tt-title"></div>
+  <div class="tt-detail"></div>
+  <div class="tt-color"></div>
+  <div class="tt-city"></div>
+  <div class="tt-source"></div>
+  <div class="tt-extra"></div>
+  <div class="tt-buttons">
+    <a class="tt-open" href="#" target="_blank">Open listing</a>
+    <button class="tt-info-btn">Info</button>
+  </div>
+</div>
+
+<div class="info-overlay">
+  <div class="info-popup">
+    <button class="info-close">&times;</button>
+    <div class="info-title"></div>
+    <div class="info-body"></div>
+  </div>
+</div>
+
+<script>
+const SHAPES = { 'Forester': 'circle', 'Outback': 'rectRot', 'RAV4': 'triangle', 'HR-V': 'rect', 'CR-V': 'rectRounded', 'Kona': 'star', 'Crosstrek': 'cross' };
+const COLORS = { latest: '#ffd700', recent: '#2ecc71', old: '#7f8c8d' };
+const SIZES  = { latest: { r: 7, hr: 9, bw: 0 }, recent: { r: 7, hr: 9, bw: 0 }, old: { r: 7, hr: 9, bw: 0 } };
+const SOURCE_LABELS = { autotrader: 'AutoTrader', facebook: 'Facebook' };
+const normSource = v => (v || 'autotrader').toString().toLowerCase();
+
+const data = [{"source": "autotrader", "make": "Subaru", "model": "Forester", "year": 2015, "mileage_km": 142645, "price_cad": 8800, "url": "https://www.autotrader.ca/offers/subaru-forester-2-5i--integral--sieges-av-chauffant--non-recon-gasoline-grey-c97f2f3a-f2ca-49c5-a1c0-de688512ef38", "title": "2015 Subaru Forester", "city": "SAINT-GEORGES", "has_cruise": false, "has_carplay": false, "seller_name": "St-Georges Chevrolet Buick Cadillac GMC", "price_analysis": "", "freshness": "recent", "body_color": "Grey", "image_url": "https://prod.pictures.autoscout24.net/listing-images/c97f2f3a-f2ca-49c5-a1c0-de688512ef38_5ade1fe5-fbae-44ed-9db2-e00adc8e0c06.jpg/1280x960.webp", "carfax_url": "", "comfort_equipment": "", "safety_equipment": "", "consumption_city": 9.6, "consumption_highway": 7.5, "transmission": "Automatic", "upholstery_color": "Black", "model_version": "2.5i | INTEGRAL | SIEGES AV. CHAUFFANT | NON RECON"}];
+
+const datasets = {};
+Object.keys(SHAPES).forEach(model => {
+  datasets[model] = { label: model, data: [], meta: [], backgroundColor: [], borderColor: [], pointRadius: [], pointHoverRadius: [], pointBorderColor: [], pointBorderWidth: [], pointStyle: SHAPES[model], showLine: false };
+});
+
+function rebuild() {
+  const active = new Set([...document.querySelectorAll('.controls input[data-source]')].filter(c => c.checked).map(c => c.dataset.source));
+  Object.values(datasets).forEach(ds => {
+    ds.data = []; ds.meta = []; ds.backgroundColor = []; ds.borderColor = [];
+    ds.pointRadius = []; ds.pointHoverRadius = []; ds.pointBorderColor = []; ds.pointBorderWidth = [];
+  });
+  data.forEach(d => {
+    if (!active.has(normSource(d.source))) return;
+    const ds = datasets[d.model];
+    if (!ds) return;
+    ds.data.push({ x: d.mileage_km, y: d.price_cad });
+    ds.meta.push(d);
+    const f = d.freshness || 'old';
+    const c = COLORS[f], s = SIZES[f];
+    ds.backgroundColor.push(c);
+    ds.borderColor.push(c);
+    ds.pointRadius.push(s.r);
+    ds.pointHoverRadius.push(s.hr);
+    ds.pointBorderColor.push(c);
+    ds.pointBorderWidth.push(['star', 'cross'].includes(SHAPES[d.model]) ? 2 : 0);
+  });
+}
+rebuild();
+
+Chart.register(ChartDataLabels);
+
+let selectedKey = null;
+let currentItem = null;
+
+function showTooltip(item, cx, cy) {
+  currentItem = item;
+  const tt = document.getElementById('tooltip');
+  tt.querySelector('.tt-title').textContent = item.title;
+  tt.querySelector('.tt-detail').textContent = item.year + ' \u00b7 ' + item.mileage_km.toLocaleString() + ' km \u00b7 $' + item.price_cad.toLocaleString();
+  tt.querySelector('.tt-color').textContent = item.body_color ? 'Color: ' + item.body_color : '';
+  tt.querySelector('.tt-city').textContent = item.city;
+  const srcKey = normSource(item.source);
+  tt.querySelector('.tt-source').textContent = 'Source: ' + (SOURCE_LABELS[srcKey] || item.source || 'AutoTrader');
+  const cruise = item.has_cruise ? 'Yes' : 'No';
+  const carplay = item.has_carplay ? 'Yes' : 'No';
+  const extra = 'Cruise: ' + cruise + ' | CarPlay: ' + carplay + '\n' + item.seller_name + (item.price_analysis ? '\n' + item.price_analysis : '');
+  tt.querySelector('.tt-extra').textContent = extra;
+  tt.querySelector('.tt-open').href = item.url;
+  tt.style.display = 'block';
+  const rect = tt.getBoundingClientRect();
+  const left = Math.min(cx + 14, window.innerWidth - rect.width - 10);
+  const top = Math.min(cy - 10, window.innerHeight - rect.height - 10);
+  tt.style.left = left + 'px';
+  tt.style.top = Math.max(10, top) + 'px';
+}
+
+function showInfoPopup(item) {
+  const overlay = document.querySelector('.info-overlay');
+  const popup = overlay.querySelector('.info-popup');
+  popup.querySelector('.info-title').textContent = item.title;
+  const body = popup.querySelector('.info-body');
+  body.innerHTML = '';
+
+  function addLine(label, value) {
+    if (!value) return;
+    const div = document.createElement('div');
+    const b = document.createElement('strong');
+    b.textContent = label + ': ';
+    div.appendChild(b);
+    const span = document.createElement('span');
+    span.textContent = value;
+    div.appendChild(span);
+    body.appendChild(div);
+  }
+
+  if (item.carfax_url) {
+    const div = document.createElement('div');
+    const a = document.createElement('a');
+    a.href = item.carfax_url;
+    a.target = '_blank';
+    a.textContent = 'CarFax Report';
+    div.appendChild(a);
+    body.appendChild(div);
+  }
+  addLine('Source', SOURCE_LABELS[normSource(item.source)] || item.source);
+  addLine('Model version', item.model_version);
+  addLine('Transmission', item.transmission);
+  addLine('Body color', item.body_color);
+  addLine('Upholstery', item.upholstery_color);
+  if (item.consumption_city != null || item.consumption_highway != null) {
+    const parts = [];
+    if (item.consumption_city != null) parts.push('City: ' + item.consumption_city + ' L/100km');
+    if (item.consumption_highway != null) parts.push('Hwy: ' + item.consumption_highway + ' L/100km');
+    addLine('Consumption', parts.join(' / '));
+  }
+  addLine('Comfort equipment', item.comfort_equipment);
+  addLine('Safety equipment', item.safety_equipment);
+
+  if (item.image_url) {
+    const img = document.createElement('img');
+    img.src = item.image_url;
+    img.className = 'info-img';
+    img.alt = item.title;
+    body.appendChild(img);
+  }
+
+  overlay.style.display = 'flex';
+}
+
+document.querySelector('.tt-info-btn').addEventListener('click', function(e) {
+  e.stopPropagation();
+  if (currentItem) showInfoPopup(currentItem);
+});
+
+document.querySelector('.info-overlay').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+document.querySelector('.info-close').addEventListener('click', function() {
+  document.querySelector('.info-overlay').style.display = 'none';
+});
+
+document.addEventListener('click', function(e) {
+  if (e.target.closest('#tooltip') || e.target.tagName === 'CANVAS') return;
+  document.getElementById('tooltip').style.display = 'none';
+  selectedKey = null;
+});
+
+const ctx = document.getElementById('chart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'scatter',
+  data: { datasets: Object.values(datasets) },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 600 },
+    scales: {
+      x: {
+        min: 59000,
+        title: { display: true, text: 'Kilometres', color: '#aaa', font: { size: 14 } },
+        ticks: { color: '#888', callback: v => (v/1000).toFixed(0) + 'k' },
+        grid: { color: '#2a2a4a' }
+      },
+      y: {
+        min: 4799,
+        title: { display: true, text: 'Price (CAD)', color: '#aaa', font: { size: 14 } },
+        ticks: { color: '#888', callback: v => '$' + v.toLocaleString() },
+        grid: { color: '#2a2a4a' }
+      }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: { enabled: false },
+      datalabels: {
+        align: 'bottom',
+        offset: 4,
+        color: '#999',
+        font: { size: 9 },
+        formatter(value, ctx) {
+          const item = ctx.dataset.meta[ctx.dataIndex];
+          return item.model + '\n' + item.year;
+        }
+      }
+    },
+    onClick(e, elements) {
+      const tt = document.getElementById('tooltip');
+      if (!elements.length) { tt.style.display = 'none'; selectedKey = null; return; }
+      const el = elements[0];
+      const ds = chart.data.datasets[el.datasetIndex];
+      const item = ds.meta[el.index];
+      const key = el.datasetIndex + '-' + el.index;
+      if (selectedKey === key) {
+        window.open(item.url, '_blank');
+        return;
+      }
+      selectedKey = key;
+      showTooltip(item, e.native.clientX, e.native.clientY);
+    },
+    onHover(e, elements) {
+      if ('ontouchstart' in window) return;
+      if (!elements.length) return;
+      const el = elements[0];
+      const ds = chart.data.datasets[el.datasetIndex];
+      const item = ds.meta[el.index];
+      selectedKey = el.datasetIndex + '-' + el.index;
+      showTooltip(item, e.native.clientX, e.native.clientY);
+    }
+  }
+});
+
+document.querySelectorAll('.controls input[data-model]').forEach(cb => {
+  cb.addEventListener('change', () => {
+    const idx = chart.data.datasets.findIndex(ds => ds.label === cb.dataset.model);
+    if (idx >= 0) { chart.setDatasetVisibility(idx, cb.checked); chart.update(); }
+  });
+});
+document.querySelectorAll('.controls input[data-source]').forEach(cb => {
+  cb.addEventListener('change', () => { rebuild(); chart.update(); });
+});
+</script>
+
+</body>
+</html>
