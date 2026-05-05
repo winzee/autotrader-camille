@@ -9,7 +9,7 @@ Used-vehicle scraper for the Montréal area. Despite the legacy filename (`bmw_x
 - **`camille.yaml`** — sub-$15K SUV search, 7 specific Japanese/Korean make/model pairs, year ≥ 2016, 300 km radius from H1X 3J1. Writes `used_suv_listings.csv` and `suv_scatter.html`. Pushed to https://winzee.github.io/autotrader-camille/suv_scatter.html.
 - **`emile.yaml`** — sub-$9K AWD search (no body-type/model filter; `dtrain=A` URL param), Japanese + Korean brands, year ≥ 2007, 200 km radius from H1X 3J1. Writes `emile_suv_listings.csv` and `emile_scatter.html`. Pushed to https://winzee.github.io/autotrader-camille/emile_scatter.html (same repo as Camille).
 
-Per-profile knobs (postal code, radius, price min/max, year min, province filter, vehicle list, FB queries, output paths, GitHub Pages target, HTML title/heading, scatter chart price floor/ceiling) all live in the YAML file. See `config.py` for the full schema.
+Per-profile knobs (postal code, radius, price min/max, year min, province filter, vehicle list, FB queries, output paths, GitHub Pages target, HTML title/heading, optional scatter price caps) all live in the YAML file. See `config.py` for the full schema.
 
 ## Commands
 
@@ -78,6 +78,18 @@ A final `province == cfg.filters.province` filter drops out-of-province listings
 
 `fb_scraper.py` uses a **persistent Chrome profile** (`fb_profile/`) so login cookies survive between runs. Scrolls Marketplace search, applies regex+year filters per `cfg.fb_queries`, hydrates each card, and merges into the profile's CSV. Each FB query has `query` (free-text), `regex` (title filter), `model_canonical` (CSV `model` value, may be null for generic searches like Émile's "awd"), `year_range`, and optional `make` (CSV `make` value; if null, the row's `make` is left blank).
 
+### Scatter chart (`generate_scatter_html`)
+
+Profile-agnostic — adapts to whatever models the active profile's CSV contains. The pipeline:
+
+1. **Profile filter** — keep rows whose `make` is in `{u.make.capitalize() for u in cfg.search_units}` and (if set) `province == cfg.filters.province`.
+2. **Outlier filter** — `_iqr_fences()` computes Tukey 3×IQR fences on `price_cad` and `mileage_km`. Rows outside both fences are dropped. **Use 3× (extreme outlier), not the textbook 1.5×** — on small samples (~50 listings) the 1.5× fence cuts into legitimate budget-end deals (e.g. a $4999 2011 Mazda Tribute is *not* an outlier in a $3-9k market). 3× catches only true junk like a $5 broken-car listing or a $32k Subaru that slipped past the URL filter.
+3. **Axis bounds** — `_axis_bounds()` sizes both axes to `[data_min - 4% pad, data_max + 4% pad]` of the *filtered* data. `cfg.html.chart_price_floor` and `cfg.html.chart_price_max` are **optional** clamps applied on top — set them only when you want a hard ceiling regardless of data (typical case: leave both unset).
+4. **Dynamic per-model datasets** — every unique `model` in the surviving data gets its own Chart.js dataset, ordered by frequency (most-common gets `circle`, etc.). Shapes cycle through `_SCATTER_SHAPE_POOL` (10 styles); model→shape is recomputed each render. Legend checkboxes and the SVG icons next to them are generated server-side in Python by `_shape_svg()` so they always match what's drawn on the canvas.
+5. **Line-shape rendering** — Chart.js draws `cross`, `crossRot`, `dash`, `line`, and `star` as stroke-only (no fill); they render at 0px without `pointBorderWidth`. The list lives in `_SCATTER_LINE_SHAPES` and is shipped to the JS as a `LINE_SHAPES` Set. Any model assigned a stroked shape gets `pointBorderWidth: 2.5` and `pointRadius + 1` so its glyph reads at the same visual weight as a filled shape. **If a Chart.js update adds a new stroke-only point style, append it to `_SCATTER_LINE_SHAPES` — that's the only thing to change.**
+
+Color encodes scrape freshness (gold = latest run, green = today/yesterday, gray = older). Shape encodes model. The two axes are price (y) vs mileage (x).
+
 ## Data Reference
 
 - `gu.json` — sample `ngVdpModel` (Angular detail page).
@@ -87,7 +99,7 @@ A final `province == cfg.filters.province` filter drops out-of-province listings
 
 All per-user knobs live in YAML profiles (`camille.yaml`, `emile.yaml`). See `config.py` for the full schema. Top-level sections:
 - `output` — CSV / scatter HTML / log directory paths.
-- `html` — page title, H1 heading, optional public URL link, scatter `chart_price_max` / `chart_price_floor`.
+- `html` — page title, H1 heading, optional public URL link. `chart_price_max` / `chart_price_floor` are **optional** hard caps applied on top of the auto-derived axis bounds (leave them out for pure auto-scale).
 - `github_pages` — `enabled: bool`; `repo: <user/repo>` when enabled. Multiple profiles can share one repo (each commits its own scatter HTML file).
 - `filters.province` — single-province filter (e.g. `QC`); `null` disables.
 - `autotrader.search` — `year_min`, `price_min`, `price_max`, `radius_km`, `postal_code`, `extra_params` (free-form dict appended to the AT URL — e.g. `{dtrain: A}` for AWD-only).
@@ -104,3 +116,5 @@ Environmental constants still hardcoded:
 - **`rcp=100` is silently ignored.** Each search page returns ~20 URLs per vehicle regardless. Pagination via `&page=N` is unreliable and frequently breaks back to Angular.
 - **`is_deleted` is a timestamp, not a boolean.** Any analysis script must use `notna()` / `isna()`.
 - **Run logs are best-effort.** `setup_run_log()` tees stdout/stderr to `logs/`; failures there are swallowed so logging never breaks a scrape.
+- **Chart.js stroke-only point styles render at 0px without `pointBorderWidth`.** `cross`, `crossRot`, `dash`, `line`, and `star` are line-only — they have no fill. If you add a new shape to `_SCATTER_SHAPE_POOL` and forget to also add it to `_SCATTER_LINE_SHAPES` (when applicable), points using it will appear as a label hovering above empty space. We've hit this multiple times — the canonical list lives in `bmw_x3_scraper.py` and ships into the inline JS as `LINE_SHAPES`.
+- **Tukey 1.5×IQR is too aggressive on small samples.** The scatter outlier filter uses 3×IQR ("extreme outlier") instead. With ~50 listings, 1.5× cuts into legitimate budget-end deals and high-mileage real cars. 3× catches only true junk (a $5 broken-car listing, a $32k Subaru in Camille's $15k search). See `_iqr_fences()` in `bmw_x3_scraper.py`.
