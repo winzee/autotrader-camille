@@ -14,9 +14,37 @@
   .heading h1 { font-size: 1.05rem; font-weight: 600; color: #eee; }
   .heading .live-link { color: #3498db; font-size: 0.78rem; text-decoration: none; }
   .heading .live-link:hover { text-decoration: underline; }
-  .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; margin-bottom: 8px; font-size: 0.9rem; }
-  .controls label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .controls { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; font-size: 0.85rem; }
+  .controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .controls-row.dropdown-row { justify-content: center; }
   .controls svg { vertical-align: middle; }
+  .dropdown { position: relative; }
+  .dd-toggle { background: #16213e; color: #eee; border: 1px solid #555; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+  .dd-toggle:hover { background: #1e2c50; }
+  .dd-toggle .dd-caret { margin-left: 8px; opacity: 0.7; }
+  .dd-toggle .dd-summary { color: #aaa; font-size: 0.78rem; margin-left: 6px; }
+  .dd-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; background: #16213e; border: 1px solid #555; border-radius: 8px; padding: 8px; min-width: 240px; width: max-content; max-width: calc(100vw - 24px); max-height: 70vh; overflow-y: auto; z-index: 50; box-shadow: 0 4px 12px rgba(0,0,0,0.4); -webkit-overflow-scrolling: touch; }
+  .dropdown.open .dd-panel { display: block; }
+  .dd-content { display: flex; flex-direction: column; }
+  .all-row { padding: 8px 4px; border-bottom: 1px solid #2a2a4a; margin-bottom: 4px; }
+  .all-label { display: flex; align-items: center; gap: 8px; cursor: pointer; min-height: 36px; font-weight: 600; -webkit-tap-highlight-color: transparent; }
+  .make-group { margin-bottom: 2px; }
+  .make-label { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 4px; min-height: 36px; font-weight: 600; -webkit-tap-highlight-color: transparent; }
+  .model-list { display: flex; flex-direction: column; padding-left: 26px; }
+  .model-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 400; padding: 6px 4px; min-height: 32px; -webkit-tap-highlight-color: transparent; }
+  .source-label { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 4px; min-height: 36px; -webkit-tap-highlight-color: transparent; }
+  .all-cb, .make-cb, .model-cb, .source-cb { width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; }
+  .slider-group { display: flex; align-items: center; gap: 10px; flex: 1 1 280px; min-width: 240px; }
+  .slider-group .slider-label { color: #bbb; min-width: 60px; font-size: 0.82rem; }
+  .slider-group .slider-display { color: #ddd; min-width: 130px; font-size: 0.82rem; font-variant-numeric: tabular-nums; text-align: right; }
+  .dual-slider { position: relative; flex: 1; height: 32px; min-width: 120px; touch-action: pan-y; }
+  .dual-slider .track { position: absolute; left: 0; right: 0; top: 14px; height: 4px; background: #2a2a4a; border-radius: 2px; pointer-events: none; }
+  .dual-slider .track-active { position: absolute; top: 14px; height: 4px; background: #3498db; border-radius: 2px; pointer-events: none; }
+  .dual-slider input[type="range"] { position: absolute; left: 0; right: 0; top: 0; width: 100%; height: 32px; background: transparent; -webkit-appearance: none; appearance: none; pointer-events: none; margin: 0; -webkit-tap-highlight-color: transparent; }
+  .dual-slider input[type="range"]::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #3498db; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+  .dual-slider input[type="range"]::-moz-range-thumb { pointer-events: auto; width: 22px; height: 22px; border-radius: 50%; background: #3498db; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+  .dual-slider input[type="range"]::-webkit-slider-runnable-track { background: transparent; }
+  .dual-slider input[type="range"]::-moz-range-track { background: transparent; }
   .chart-wrap { flex: 1; min-height: 300px; position: relative; background: #16213e; border-radius: 12px; padding: 12px; }
   canvas { cursor: pointer; }
   #tooltip { position: fixed; background: #0f3460; border: 1px solid #555; border-radius: 8px; padding: 10px 14px; font-size: 0.82rem; pointer-events: auto; display: none; z-index: 10; line-height: 1.5; }
@@ -46,51 +74,160 @@
 </div>
 
 <div class="controls">
-  <label><input type="checkbox" checked data-model="Rogue"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Rogue</label>
-  <label><input type="checkbox" checked data-model="SANTA FE"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> SANTA FE</label>
-  <label><input type="checkbox" checked data-model="Sorento"> <svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Sorento</label>
-  <label><input type="checkbox" checked data-model="Impreza"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Impreza</label>
-  <label><input type="checkbox" checked data-model="Forester"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Forester</label>
-  <label><input type="checkbox" checked data-model="OUTBACK"> <svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> OUTBACK</label>
-  <label><input type="checkbox" checked data-model="Legacy"> <svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> Legacy</label>
-  <label><input type="checkbox" checked data-model="Murano"> <svg width="14" height="14"><line x1="2" y1="2" x2="12" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="12" x2="12" y2="2" stroke="#7f8c8d" stroke-width="2"/></svg> Murano</label>
-  <label><input type="checkbox" checked data-model="TUCSON"> <svg width="14" height="14"><rect x="2" y="6" width="10" height="2" fill="#7f8c8d"/></svg> TUCSON</label>
-  <label><input type="checkbox" checked data-model="Sportage"> <svg width="14" height="14"><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> Sportage</label>
-  <label><input type="checkbox" checked data-model="RDX"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> RDX</label>
-  <label><input type="checkbox" checked data-model="XV"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> XV</label>
-  <label><input type="checkbox" checked data-model="FX"> <svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> FX</label>
-  <label><input type="checkbox" checked data-model="Juke"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Juke</label>
-  <label><input type="checkbox" checked data-model="IS"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> IS</label>
-  <label><input type="checkbox" checked data-model="Crosstrek"> <svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Crosstrek</label>
-  <label><input type="checkbox" checked data-model="QX60"> <svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> QX60</label>
-  <label><input type="checkbox" checked data-model="CX-9"> <svg width="14" height="14"><line x1="2" y1="2" x2="12" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="12" x2="12" y2="2" stroke="#7f8c8d" stroke-width="2"/></svg> CX-9</label>
-  <label><input type="checkbox" checked data-model="RVR"> <svg width="14" height="14"><rect x="2" y="6" width="10" height="2" fill="#7f8c8d"/></svg> RVR</label>
-  <label><input type="checkbox" checked data-model="MDX"> <svg width="14" height="14"><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> MDX</label>
-  <label><input type="checkbox" checked data-model="CR-V"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> CR-V</label>
-  <label><input type="checkbox" checked data-model="RAV 4"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> RAV 4</label>
-  <label><input type="checkbox" checked data-model="QX50"> <svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> QX50</label>
-  <label><input type="checkbox" checked data-model="G"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> G</label>
-  <label><input type="checkbox" checked data-model="SX4"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> SX4</label>
-  <label><input type="checkbox" checked data-model="EX"> <svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> EX</label>
-  <label><input type="checkbox" checked data-model="CX-5"> <svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> CX-5</label>
-  <label><input type="checkbox" checked data-model="Pilot"> <svg width="14" height="14"><line x1="2" y1="2" x2="12" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="12" x2="12" y2="2" stroke="#7f8c8d" stroke-width="2"/></svg> Pilot</label>
-  <label><input type="checkbox" checked data-model="Matrix"> <svg width="14" height="14"><rect x="2" y="6" width="10" height="2" fill="#7f8c8d"/></svg> Matrix</label>
-  <label><input type="checkbox" checked data-model="Qashqai"> <svg width="14" height="14"><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> Qashqai</label>
-  <label><input type="checkbox" checked data-model="Q50"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Q50</label>
-  <label><input type="checkbox" checked data-model="Veracruz"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Veracruz</label>
-  <label><input type="checkbox" checked data-model="Q60"> <svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Q60</label>
-  <label><input type="checkbox" checked data-model="TL"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> TL</label>
-  <label><input type="checkbox" checked data-model="Altima"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Altima</label>
-  <label><input type="checkbox" checked data-model="Corolla"> <svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Corolla</label>
-  <label><input type="checkbox" checked data-model="TLX"> <svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> TLX</label>
-  <label><input type="checkbox" checked data-model="bZ4X"> <svg width="14" height="14"><line x1="2" y1="2" x2="12" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="12" x2="12" y2="2" stroke="#7f8c8d" stroke-width="2"/></svg> bZ4X</label>
-  <label><input type="checkbox" checked data-model="Eclipse Cross"> <svg width="14" height="14"><rect x="2" y="6" width="10" height="2" fill="#7f8c8d"/></svg> Eclipse Cross</label>
-  <label><input type="checkbox" checked data-model="Outlander"> <svg width="14" height="14"><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> Outlander</label>
-  <label><input type="checkbox" checked data-model="Tribute"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Tribute</label>
-  <label><input type="checkbox" checked data-model="Rio"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Rio</label>
-  <span style="opacity:0.35">|</span>
-  <label><input type="checkbox" checked data-source="autotrader"> AutoTrader</label>
-  <label><input type="checkbox" checked data-source="facebook"> Facebook</label>
+  <div class="controls-row dropdown-row">
+    <div class="dropdown" data-dropdown="cars">
+      <button class="dd-toggle" type="button">Cars<span class="dd-summary"></span><span class="dd-caret">▾</span></button>
+      <div class="dd-panel">
+        <div class="dd-content">
+          <div class="all-row">
+            <label class="all-label"><input type="checkbox" class="all-cb" checked><span>All</span></label>
+          </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Acura" checked><span class="make-name">Acura</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Acura" data-model="RDX" checked><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">RDX</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Acura" data-model="MDX" checked><svg width="14" height="14"><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">MDX</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Acura" data-model="TL" checked><svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">TL</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Acura" data-model="TLX" checked><svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">TLX</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Honda" checked><span class="make-name">Honda</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Honda" data-model="CR-V" checked><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">CR-V</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Honda" data-model="Pilot" checked><svg width="14" height="14"><line x1="2" y1="2" x2="12" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="12" x2="12" y2="2" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">Pilot</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Hyundai" checked><span class="make-name">Hyundai</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Hyundai" data-model="SANTA FE" checked><svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">SANTA FE</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Hyundai" data-model="TUCSON" checked><svg width="14" height="14"><rect x="2" y="6" width="10" height="2" fill="#7f8c8d"/></svg><span class="model-name">TUCSON</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Hyundai" data-model="Veracruz" checked><svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Veracruz</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Infiniti" checked><span class="make-name">Infiniti</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Infiniti" data-model="FX" checked><svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">FX</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Infiniti" data-model="QX60" checked><svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">QX60</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Infiniti" data-model="QX50" checked><svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">QX50</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Infiniti" data-model="G" checked><svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">G</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Infiniti" data-model="EX" checked><svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">EX</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Infiniti" data-model="Q50" checked><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Q50</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Infiniti" data-model="Q60" checked><svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Q60</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Kia" checked><span class="make-name">Kia</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Kia" data-model="Sorento" checked><svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Sorento</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Kia" data-model="Sportage" checked><svg width="14" height="14"><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">Sportage</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Kia" data-model="Rio" checked><svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Rio</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Lexus" checked><span class="make-name">Lexus</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Lexus" data-model="IS" checked><svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">IS</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Mazda" checked><span class="make-name">Mazda</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Mazda" data-model="CX-9" checked><svg width="14" height="14"><line x1="2" y1="2" x2="12" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="12" x2="12" y2="2" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">CX-9</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Mazda" data-model="CX-5" checked><svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">CX-5</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Mazda" data-model="Tribute" checked><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Tribute</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Mitsubishi" checked><span class="make-name">Mitsubishi</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Mitsubishi" data-model="RVR" checked><svg width="14" height="14"><rect x="2" y="6" width="10" height="2" fill="#7f8c8d"/></svg><span class="model-name">RVR</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Mitsubishi" data-model="Eclipse Cross" checked><svg width="14" height="14"><rect x="2" y="6" width="10" height="2" fill="#7f8c8d"/></svg><span class="model-name">Eclipse Cross</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Mitsubishi" data-model="Outlander" checked><svg width="14" height="14"><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">Outlander</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Nissan" checked><span class="make-name">Nissan</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Nissan" data-model="Rogue" checked><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Rogue</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Nissan" data-model="Murano" checked><svg width="14" height="14"><line x1="2" y1="2" x2="12" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="12" x2="12" y2="2" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">Murano</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Nissan" data-model="Juke" checked><svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Juke</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Nissan" data-model="Qashqai" checked><svg width="14" height="14"><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">Qashqai</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Nissan" data-model="Altima" checked><svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Altima</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Subaru" checked><span class="make-name">Subaru</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Subaru" data-model="Impreza" checked><svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Impreza</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Subaru" data-model="Forester" checked><svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Forester</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Subaru" data-model="OUTBACK" checked><svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">OUTBACK</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Subaru" data-model="Legacy" checked><svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">Legacy</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Subaru" data-model="XV" checked><svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">XV</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Subaru" data-model="Crosstrek" checked><svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Crosstrek</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Suzuki" checked><span class="make-name">Suzuki</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Suzuki" data-model="SX4" checked><svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">SX4</span></label>
+      </div>
+      </div>
+      <div class="make-group">
+      <label class="make-label"><input type="checkbox" class="make-cb" data-make="Toyota" checked><span class="make-name">Toyota</span></label>
+      <div class="model-list">
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Toyota" data-model="RAV 4" checked><svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">RAV 4</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Toyota" data-model="Matrix" checked><svg width="14" height="14"><rect x="2" y="6" width="10" height="2" fill="#7f8c8d"/></svg><span class="model-name">Matrix</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Toyota" data-model="Corolla" checked><svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg><span class="model-name">Corolla</span></label>
+      <label class="model-label"><input type="checkbox" class="model-cb" data-make="Toyota" data-model="bZ4X" checked><svg width="14" height="14"><line x1="2" y1="2" x2="12" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="12" x2="12" y2="2" stroke="#7f8c8d" stroke-width="2"/></svg><span class="model-name">bZ4X</span></label>
+      </div>
+      </div>
+        </div>
+      </div>
+    </div>
+    <div class="dropdown" data-dropdown="source">
+      <button class="dd-toggle" type="button">Source<span class="dd-summary"></span><span class="dd-caret">▾</span></button>
+      <div class="dd-panel">
+        <div class="dd-content">
+      <label class="source-label"><input type="checkbox" class="source-cb" data-source="autotrader" checked><span>AutoTrader</span></label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="controls-row">
+    <div class="slider-group" data-slider="year">
+      <span class="slider-label">Year</span>
+      <div class="dual-slider">
+        <div class="track"></div>
+        <div class="track-active"></div>
+        <input type="range" class="slider-min" min="2007" max="2023" step="1" value="2007">
+        <input type="range" class="slider-max" min="2007" max="2023" step="1" value="2023">
+      </div>
+      <span class="slider-display"></span>
+    </div>
+    <div class="slider-group" data-slider="price">
+      <span class="slider-label">Price</span>
+      <div class="dual-slider">
+        <div class="track"></div>
+        <div class="track-active"></div>
+        <input type="range" class="slider-min" min="3000" max="9990" step="50" value="3000">
+        <input type="range" class="slider-max" min="3000" max="9990" step="50" value="9990">
+      </div>
+      <span class="slider-display"></span>
+    </div>
+    <div class="slider-group" data-slider="mileage">
+      <span class="slider-label">Mileage</span>
+      <div class="dual-slider">
+        <div class="track"></div>
+        <div class="track-active"></div>
+        <input type="range" class="slider-min" min="120" max="315000" step="1000" value="120">
+        <input type="range" class="slider-max" min="120" max="315000" step="1000" value="315000">
+      </div>
+      <span class="slider-display"></span>
+    </div>
+  </div>
 </div>
 
 <div class="chart-wrap">
@@ -134,14 +271,41 @@ Object.keys(SHAPES).forEach(model => {
   datasets[model] = { label: model, data: [], meta: [], backgroundColor: [], borderColor: [], pointRadius: [], pointHoverRadius: [], pointBorderColor: [], pointBorderWidth: [], pointStyle: SHAPES[model], showLine: false };
 });
 
+// Filter state — single ``applied`` object. Every checkbox / slider input
+// mutates this directly and triggers ``rebuild + chart.update`` inline; the
+// dataset is small enough (few hundred points worst case) that filtering
+// in JS is sub-frame, so an Apply step would just add a click.
+const allModels = new Set(Object.keys(SHAPES));
+const allSources = new Set([...document.querySelectorAll('.source-cb')].map(c => c.dataset.source));
+const sliderEl = (key) => document.querySelector('.slider-group[data-slider="' + key + '"]');
+const readSliderRange = (key) => {
+  const g = sliderEl(key);
+  return [parseFloat(g.querySelector('.slider-min').value),
+          parseFloat(g.querySelector('.slider-max').value)];
+};
+const [yearMin0, yearMax0] = readSliderRange('year');
+const [priceMin0, priceMax0] = readSliderRange('price');
+const [kmMin0, kmMax0] = readSliderRange('mileage');
+
+const applied = {
+  models: new Set(allModels),
+  sources: new Set(allSources),
+  yearMin: yearMin0, yearMax: yearMax0,
+  priceMin: priceMin0, priceMax: priceMax0,
+  kmMin: kmMin0, kmMax: kmMax0,
+};
+
 function rebuild() {
-  const active = new Set([...document.querySelectorAll('.controls input[data-source]')].filter(c => c.checked).map(c => c.dataset.source));
   Object.values(datasets).forEach(ds => {
     ds.data = []; ds.meta = []; ds.backgroundColor = []; ds.borderColor = [];
     ds.pointRadius = []; ds.pointHoverRadius = []; ds.pointBorderColor = []; ds.pointBorderWidth = [];
   });
   data.forEach(d => {
-    if (!active.has(normSource(d.source))) return;
+    if (!applied.sources.has(normSource(d.source))) return;
+    if (!applied.models.has(d.model)) return;
+    if (d.year < applied.yearMin || d.year > applied.yearMax) return;
+    if (d.price_cad < applied.priceMin || d.price_cad > applied.priceMax) return;
+    if (d.mileage_km < applied.kmMin || d.mileage_km > applied.kmMax) return;
     const ds = datasets[d.model];
     if (!ds) return;
     ds.data.push({ x: d.mileage_km, y: d.price_cad });
@@ -323,15 +487,180 @@ const chart = new Chart(ctx, {
   }
 });
 
-document.querySelectorAll('.controls input[data-model]').forEach(cb => {
+// ── Cars dropdown: tri-state hierarchy (All → Make → Model) ────────────
+function cssEscape(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/"/g, '\\"');
+}
+const allCb = document.querySelector('.all-cb');
+
+function syncMakeFromModels(makeName) {
+  const makeBox = document.querySelector('.make-cb[data-make="' + cssEscape(makeName) + '"]');
+  if (!makeBox) return;
+  const siblings = [...document.querySelectorAll('.model-cb[data-make="' + cssEscape(makeName) + '"]')];
+  const checked = siblings.filter(c => c.checked).length;
+  if (checked === 0) { makeBox.checked = false; makeBox.indeterminate = false; }
+  else if (checked === siblings.length) { makeBox.checked = true; makeBox.indeterminate = false; }
+  else { makeBox.checked = false; makeBox.indeterminate = true; }
+}
+function syncAllFromState() {
+  if (!allCb) return;
+  const total = allModels.size;
+  const picked = applied.models.size;
+  if (picked === 0) { allCb.checked = false; allCb.indeterminate = false; }
+  else if (picked === total) { allCb.checked = true; allCb.indeterminate = false; }
+  else { allCb.checked = false; allCb.indeterminate = true; }
+}
+function updateDropdownSummary(name) {
+  const dd = document.querySelector('.dropdown[data-dropdown="' + name + '"]');
+  if (!dd) return;
+  const summaryEl = dd.querySelector('.dd-summary');
+  if (name === 'cars') {
+    const total = allModels.size, picked = applied.models.size;
+    summaryEl.textContent = ' ' + (picked === total ? '(all)' : '(' + picked + '/' + total + ')');
+  } else if (name === 'source') {
+    const total = allSources.size, picked = applied.sources.size;
+    summaryEl.textContent = ' ' + (picked === total ? '(all)' : '(' + picked + '/' + total + ')');
+  }
+}
+function commitCars() {
+  syncAllFromState();
+  updateDropdownSummary('cars');
+  rebuild(); chart.update('none');
+}
+function commitSources() {
+  updateDropdownSummary('source');
+  rebuild(); chart.update('none');
+}
+
+if (allCb) {
+  allCb.addEventListener('change', () => {
+    const v = allCb.checked;
+    document.querySelectorAll('.model-cb').forEach(cb => {
+      cb.checked = v;
+      if (v) applied.models.add(cb.dataset.model); else applied.models.delete(cb.dataset.model);
+    });
+    document.querySelectorAll('.make-cb').forEach(cb => {
+      cb.checked = v; cb.indeterminate = false;
+    });
+    allCb.indeterminate = false;
+    commitCars();
+  });
+}
+
+document.querySelectorAll('.make-cb').forEach(cb => {
   cb.addEventListener('change', () => {
-    const idx = chart.data.datasets.findIndex(ds => ds.label === cb.dataset.model);
-    if (idx >= 0) { chart.setDatasetVisibility(idx, cb.checked); chart.update(); }
+    const make = cb.dataset.make;
+    document.querySelectorAll('.model-cb[data-make="' + cssEscape(make) + '"]').forEach(m => {
+      m.checked = cb.checked;
+      if (cb.checked) applied.models.add(m.dataset.model); else applied.models.delete(m.dataset.model);
+    });
+    cb.indeterminate = false;
+    commitCars();
   });
 });
-document.querySelectorAll('.controls input[data-source]').forEach(cb => {
-  cb.addEventListener('change', () => { rebuild(); chart.update(); });
+document.querySelectorAll('.model-cb').forEach(cb => {
+  cb.addEventListener('change', () => {
+    if (cb.checked) applied.models.add(cb.dataset.model); else applied.models.delete(cb.dataset.model);
+    syncMakeFromModels(cb.dataset.make);
+    commitCars();
+  });
 });
+document.querySelectorAll('.source-cb').forEach(cb => {
+  cb.addEventListener('change', () => {
+    if (cb.checked) applied.sources.add(cb.dataset.source); else applied.sources.delete(cb.dataset.source);
+    commitSources();
+  });
+});
+
+// ── Dropdown open/close (no commit step — changes are live) ──────────
+document.querySelectorAll('.dropdown').forEach(dd => {
+  const toggle = dd.querySelector('.dd-toggle');
+  toggle.addEventListener('click', e => {
+    e.stopPropagation();
+    const wasOpen = dd.classList.contains('open');
+    document.querySelectorAll('.dropdown.open').forEach(o => o.classList.remove('open'));
+    if (!wasOpen) dd.classList.add('open');
+  });
+  dd.querySelector('.dd-panel').addEventListener('click', e => e.stopPropagation());
+});
+document.addEventListener('click', e => {
+  if (e.target.closest('.dropdown')) return;
+  document.querySelectorAll('.dropdown.open').forEach(o => o.classList.remove('open'));
+});
+updateDropdownSummary('cars');
+updateDropdownSummary('source');
+syncAllFromState();
+
+// ── Sliders: dual-handle ranges with live chart updates ───────────────
+const SLIDER_FORMATTERS = {
+  year: v => String(v),
+  price: v => '$' + Math.round(v).toLocaleString(),
+  mileage: v => Math.round(v / 1000) + 'k km',
+};
+// Rescale x/y to hug currently-visible data with a small pad. Only triggered
+// when the user *releases* a slider, so the axes stay stable mid-drag and
+// snap on commit. Year is included because narrowing year often eliminates
+// the cheapest / most expensive listings, which leaves dead space on the
+// price axis (same logic for mileage when a year cohort skews younger).
+function rescaleAxes() {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  Object.values(datasets).forEach(ds => {
+    ds.data.forEach(p => {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    });
+  });
+  if (!isFinite(minX)) return; // no visible points — leave axes alone
+  const padX = Math.max(1, (maxX - minX) * 0.04);
+  const padY = Math.max(1, (maxY - minY) * 0.04);
+  chart.options.scales.x.min = Math.floor(minX - padX);
+  chart.options.scales.x.max = Math.ceil(maxX + padX);
+  chart.options.scales.y.min = Math.floor(minY - padY);
+  chart.options.scales.y.max = Math.ceil(maxY + padY);
+  chart.update();
+}
+function setupSlider(name) {
+  const group = sliderEl(name);
+  if (!group) return;
+  const lo = group.querySelector('.slider-min');
+  const hi = group.querySelector('.slider-max');
+  const display = group.querySelector('.slider-display');
+  const trackActive = group.querySelector('.track-active');
+  const fmt = SLIDER_FORMATTERS[name];
+  const fullLo = parseFloat(lo.min);
+  const fullHi = parseFloat(lo.max);
+  const span = fullHi - fullLo;
+  function refresh() {
+    let minV = parseFloat(lo.value);
+    let maxV = parseFloat(hi.value);
+    if (minV > maxV) {
+      // Whichever handle is being dragged stays put; the other yields.
+      if (document.activeElement === lo) { hi.value = minV; maxV = minV; }
+      else { lo.value = maxV; minV = maxV; }
+    }
+    display.textContent = fmt(minV) + ' – ' + fmt(maxV);
+    if (span > 0) {
+      const leftPct = ((minV - fullLo) / span) * 100;
+      const rightPct = ((maxV - fullLo) / span) * 100;
+      trackActive.style.left = leftPct + '%';
+      trackActive.style.right = (100 - rightPct) + '%';
+    }
+    if (name === 'year') { applied.yearMin = minV; applied.yearMax = maxV; }
+    else if (name === 'price') { applied.priceMin = minV; applied.priceMax = maxV; }
+    else if (name === 'mileage') { applied.kmMin = minV; applied.kmMax = maxV; }
+    rebuild(); chart.update('none');
+  }
+  lo.addEventListener('input', refresh);
+  hi.addEventListener('input', refresh);
+  lo.addEventListener('change', rescaleAxes);
+  hi.addEventListener('change', rescaleAxes);
+  refresh();
+}
+setupSlider('year');
+setupSlider('price');
+setupSlider('mileage');
 </script>
 
 </body>

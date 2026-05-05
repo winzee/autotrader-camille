@@ -294,8 +294,13 @@ def save_fb_scrape_state(state: Dict[str, Any], path: str = FB_STATE_FILE) -> No
 
 
 def compute_days_since_listed(last_timestamp: Optional[str],
-                              buffer_days: int = 2, max_days: int = 30) -> int:
-    """Compute daysSinceListed window with overlap buffer, capped."""
+                              max_days: int,
+                              buffer_days: int = 2) -> int:
+    """Compute daysSinceListed window with overlap buffer, capped at ``max_days``.
+
+    ``max_days`` is the profile's configured ceiling (e.g. 90). When no prior
+    timestamp exists (cold start) we open the window to the full cap.
+    """
     if not last_timestamp:
         return max_days
     try:
@@ -544,6 +549,7 @@ def scrape_vehicle_facebook(driver, query: str,
                             model_regex_src: str,
                             model_canonical: Optional[str],
                             output_file: str, scrape_num: int, scrape_time: str,
+                            max_days_since_listed: int,
                             make: Optional[str] = None,
                             max_listings: int = 10,
                             year_range: Optional[Tuple[int, int]] = None,
@@ -584,15 +590,16 @@ def scrape_vehicle_facebook(driver, query: str,
                 & existing_df["ad_id"].notna())
         seen_ad_ids = set(existing_df.loc[mask, "ad_id"].astype(str))
 
-    # Compute daysSinceListed
+    # Compute daysSinceListed. The orchestrator passes
+    # ``session_last_scrape_timestamp`` once per run (or None on cold start);
+    # we never re-load a default state file here, since that would silently
+    # cross profile boundaries.
     if days_override is not None:
         days = max(1, min(365, int(days_override)))
     else:
-        if session_last_scrape_timestamp is not None:
-            last_ts = session_last_scrape_timestamp
-        else:
-            last_ts = load_fb_scrape_state().get("last_fb_scrape_timestamp")
-        days = compute_days_since_listed(last_ts)
+        days = compute_days_since_listed(
+            session_last_scrape_timestamp, max_days=max_days_since_listed,
+        )
     log(f"FB scrape: {log_id} (query={query!r}) max={max_listings} days={days} "
         f"seen_ad_ids={len(seen_ad_ids)}")
     trace_section(f"{log_id} query={query!r} days={days}")

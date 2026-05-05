@@ -102,6 +102,7 @@ If you revisit this code after a long absence and things break:
 MAX_LISTINGS = None       # Max listings per vehicle (None = all)
 LISTING_PAUSE_SECS = 5   # Pause between each listing scrape
 
+import glob
 import json
 import re
 import sys
@@ -1375,11 +1376,72 @@ def generate_scatter_html(csv_file: str, output_file: str,
     model_shapes = {m: _SCATTER_SHAPE_POOL[i % len(_SCATTER_SHAPE_POOL)]
                     for i, m in enumerate(model_order)}
 
-    model_controls_html = "\n  ".join(
-        f'<label><input type="checkbox" checked data-model="{m}"> '
-        f'{_shape_svg(model_shapes[m])} {m}</label>'
-        for m in model_order
-    )
+    # Hierarchical make → models for the Cars dropdown. Makes ordered
+    # alphabetically; models within a make ordered by overall frequency
+    # (preserves the shape-assignment ranking so the most common stays
+    # at the top).
+    makes_to_models: Dict[str, List[str]] = {}
+    if not df.empty:
+        for m in model_order:
+            mk = str(df.loc[df["model"] == m, "make"].iloc[0])
+            makes_to_models.setdefault(mk, []).append(m)
+    makes_sorted = sorted(makes_to_models.keys())
+
+    # Slider bounds — derived from the post-IQR-fence data so the sliders
+    # cover the visible range exactly. Empty-data fallback keeps the
+    # markup well-formed.
+    if df.empty:
+        year_lo, year_hi = 2000, 2025
+        price_data_lo, price_data_hi = 0, 1
+        km_data_lo, km_data_hi = 0, 1
+    else:
+        year_lo = int(df["year"].min())
+        year_hi = int(df["year"].max())
+        price_data_lo = int(df["price_cad"].min())
+        price_data_hi = int(df["price_cad"].max())
+        km_data_lo = int(df["mileage_km"].min())
+        km_data_hi = int(df["mileage_km"].max())
+    if year_hi <= year_lo:
+        year_hi = year_lo + 1
+    if price_data_hi <= price_data_lo:
+        price_data_hi = price_data_lo + 1
+    if km_data_hi <= km_data_lo:
+        km_data_hi = km_data_lo + 1
+
+    sources_present = sorted({r["source"] for r in records}) or ["autotrader"]
+    source_label = {"autotrader": "AutoTrader", "facebook": "Facebook"}
+
+    def esc(s: str) -> str:
+        return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                 .replace('"', "&quot;"))
+
+    cars_dropdown_html_parts: List[str] = []
+    for mk in makes_sorted:
+        cars_dropdown_html_parts.append('<div class="make-group">')
+        cars_dropdown_html_parts.append(
+            f'<label class="make-label"><input type="checkbox" class="make-cb" '
+            f'data-make="{esc(mk)}" checked><span class="make-name">{esc(mk)}</span></label>'
+        )
+        cars_dropdown_html_parts.append('<div class="model-list">')
+        for m in makes_to_models[mk]:
+            cars_dropdown_html_parts.append(
+                f'<label class="model-label"><input type="checkbox" class="model-cb" '
+                f'data-make="{esc(mk)}" data-model="{esc(m)}" checked>'
+                f'{_shape_svg(model_shapes[m])}<span class="model-name">{esc(m)}</span></label>'
+            )
+        cars_dropdown_html_parts.append('</div>')
+        cars_dropdown_html_parts.append('</div>')
+    cars_dropdown_html = "\n      ".join(cars_dropdown_html_parts)
+
+    source_dropdown_html_parts: List[str] = []
+    for src in sources_present:
+        lbl = source_label.get(src, src.title())
+        source_dropdown_html_parts.append(
+            f'<label class="source-label"><input type="checkbox" class="source-cb" '
+            f'data-source="{esc(src)}" checked><span>{esc(lbl)}</span></label>'
+        )
+    source_dropdown_html = "\n      ".join(source_dropdown_html_parts)
+
     shapes_js = json.dumps(model_shapes, ensure_ascii=False)
     line_shapes_js = json.dumps(_SCATTER_LINE_SHAPES)
 
@@ -1415,9 +1477,37 @@ def generate_scatter_html(csv_file: str, output_file: str,
   .heading h1 { font-size: 1.05rem; font-weight: 600; color: #eee; }
   .heading .live-link { color: #3498db; font-size: 0.78rem; text-decoration: none; }
   .heading .live-link:hover { text-decoration: underline; }
-  .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; margin-bottom: 8px; font-size: 0.9rem; }
-  .controls label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .controls { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; font-size: 0.85rem; }
+  .controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .controls-row.dropdown-row { justify-content: center; }
   .controls svg { vertical-align: middle; }
+  .dropdown { position: relative; }
+  .dd-toggle { background: #16213e; color: #eee; border: 1px solid #555; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+  .dd-toggle:hover { background: #1e2c50; }
+  .dd-toggle .dd-caret { margin-left: 8px; opacity: 0.7; }
+  .dd-toggle .dd-summary { color: #aaa; font-size: 0.78rem; margin-left: 6px; }
+  .dd-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; background: #16213e; border: 1px solid #555; border-radius: 8px; padding: 8px; min-width: 240px; width: max-content; max-width: calc(100vw - 24px); max-height: 70vh; overflow-y: auto; z-index: 50; box-shadow: 0 4px 12px rgba(0,0,0,0.4); -webkit-overflow-scrolling: touch; }
+  .dropdown.open .dd-panel { display: block; }
+  .dd-content { display: flex; flex-direction: column; }
+  .all-row { padding: 8px 4px; border-bottom: 1px solid #2a2a4a; margin-bottom: 4px; }
+  .all-label { display: flex; align-items: center; gap: 8px; cursor: pointer; min-height: 36px; font-weight: 600; -webkit-tap-highlight-color: transparent; }
+  .make-group { margin-bottom: 2px; }
+  .make-label { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 4px; min-height: 36px; font-weight: 600; -webkit-tap-highlight-color: transparent; }
+  .model-list { display: flex; flex-direction: column; padding-left: 26px; }
+  .model-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 400; padding: 6px 4px; min-height: 32px; -webkit-tap-highlight-color: transparent; }
+  .source-label { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 4px; min-height: 36px; -webkit-tap-highlight-color: transparent; }
+  .all-cb, .make-cb, .model-cb, .source-cb { width: 18px; height: 18px; cursor: pointer; flex-shrink: 0; }
+  .slider-group { display: flex; align-items: center; gap: 10px; flex: 1 1 280px; min-width: 240px; }
+  .slider-group .slider-label { color: #bbb; min-width: 60px; font-size: 0.82rem; }
+  .slider-group .slider-display { color: #ddd; min-width: 130px; font-size: 0.82rem; font-variant-numeric: tabular-nums; text-align: right; }
+  .dual-slider { position: relative; flex: 1; height: 32px; min-width: 120px; touch-action: pan-y; }
+  .dual-slider .track { position: absolute; left: 0; right: 0; top: 14px; height: 4px; background: #2a2a4a; border-radius: 2px; pointer-events: none; }
+  .dual-slider .track-active { position: absolute; top: 14px; height: 4px; background: #3498db; border-radius: 2px; pointer-events: none; }
+  .dual-slider input[type="range"] { position: absolute; left: 0; right: 0; top: 0; width: 100%; height: 32px; background: transparent; -webkit-appearance: none; appearance: none; pointer-events: none; margin: 0; -webkit-tap-highlight-color: transparent; }
+  .dual-slider input[type="range"]::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #3498db; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+  .dual-slider input[type="range"]::-moz-range-thumb { pointer-events: auto; width: 22px; height: 22px; border-radius: 50%; background: #3498db; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+  .dual-slider input[type="range"]::-webkit-slider-runnable-track { background: transparent; }
+  .dual-slider input[type="range"]::-moz-range-track { background: transparent; }
   .chart-wrap { flex: 1; min-height: 300px; position: relative; background: #16213e; border-radius: 12px; padding: 12px; }
   canvas { cursor: pointer; }
   #tooltip { position: fixed; background: #0f3460; border: 1px solid #555; border-radius: 8px; padding: 10px 14px; font-size: 0.82rem; pointer-events: auto; display: none; z-index: 10; line-height: 1.5; }
@@ -1447,10 +1537,59 @@ def generate_scatter_html(csv_file: str, output_file: str,
 </div>
 
 <div class="controls">
-  ''' + model_controls_html + '''
-  <span style="opacity:0.35">|</span>
-  <label><input type="checkbox" checked data-source="autotrader"> AutoTrader</label>
-  <label><input type="checkbox" checked data-source="facebook"> Facebook</label>
+  <div class="controls-row dropdown-row">
+    <div class="dropdown" data-dropdown="cars">
+      <button class="dd-toggle" type="button">Cars<span class="dd-summary"></span><span class="dd-caret">▾</span></button>
+      <div class="dd-panel">
+        <div class="dd-content">
+          <div class="all-row">
+            <label class="all-label"><input type="checkbox" class="all-cb" checked><span>All</span></label>
+          </div>
+      ''' + cars_dropdown_html + '''
+        </div>
+      </div>
+    </div>
+    <div class="dropdown" data-dropdown="source">
+      <button class="dd-toggle" type="button">Source<span class="dd-summary"></span><span class="dd-caret">▾</span></button>
+      <div class="dd-panel">
+        <div class="dd-content">
+      ''' + source_dropdown_html + '''
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="controls-row">
+    <div class="slider-group" data-slider="year">
+      <span class="slider-label">Year</span>
+      <div class="dual-slider">
+        <div class="track"></div>
+        <div class="track-active"></div>
+        <input type="range" class="slider-min" min="''' + str(year_lo) + '''" max="''' + str(year_hi) + '''" step="1" value="''' + str(year_lo) + '''">
+        <input type="range" class="slider-max" min="''' + str(year_lo) + '''" max="''' + str(year_hi) + '''" step="1" value="''' + str(year_hi) + '''">
+      </div>
+      <span class="slider-display"></span>
+    </div>
+    <div class="slider-group" data-slider="price">
+      <span class="slider-label">Price</span>
+      <div class="dual-slider">
+        <div class="track"></div>
+        <div class="track-active"></div>
+        <input type="range" class="slider-min" min="''' + str(price_data_lo) + '''" max="''' + str(price_data_hi) + '''" step="50" value="''' + str(price_data_lo) + '''">
+        <input type="range" class="slider-max" min="''' + str(price_data_lo) + '''" max="''' + str(price_data_hi) + '''" step="50" value="''' + str(price_data_hi) + '''">
+      </div>
+      <span class="slider-display"></span>
+    </div>
+    <div class="slider-group" data-slider="mileage">
+      <span class="slider-label">Mileage</span>
+      <div class="dual-slider">
+        <div class="track"></div>
+        <div class="track-active"></div>
+        <input type="range" class="slider-min" min="''' + str(km_data_lo) + '''" max="''' + str(km_data_hi) + '''" step="1000" value="''' + str(km_data_lo) + '''">
+        <input type="range" class="slider-max" min="''' + str(km_data_lo) + '''" max="''' + str(km_data_hi) + '''" step="1000" value="''' + str(km_data_hi) + '''">
+      </div>
+      <span class="slider-display"></span>
+    </div>
+  </div>
 </div>
 
 <div class="chart-wrap">
@@ -1494,14 +1633,41 @@ Object.keys(SHAPES).forEach(model => {
   datasets[model] = { label: model, data: [], meta: [], backgroundColor: [], borderColor: [], pointRadius: [], pointHoverRadius: [], pointBorderColor: [], pointBorderWidth: [], pointStyle: SHAPES[model], showLine: false };
 });
 
+// Filter state — single ``applied`` object. Every checkbox / slider input
+// mutates this directly and triggers ``rebuild + chart.update`` inline; the
+// dataset is small enough (few hundred points worst case) that filtering
+// in JS is sub-frame, so an Apply step would just add a click.
+const allModels = new Set(Object.keys(SHAPES));
+const allSources = new Set([...document.querySelectorAll('.source-cb')].map(c => c.dataset.source));
+const sliderEl = (key) => document.querySelector('.slider-group[data-slider="' + key + '"]');
+const readSliderRange = (key) => {
+  const g = sliderEl(key);
+  return [parseFloat(g.querySelector('.slider-min').value),
+          parseFloat(g.querySelector('.slider-max').value)];
+};
+const [yearMin0, yearMax0] = readSliderRange('year');
+const [priceMin0, priceMax0] = readSliderRange('price');
+const [kmMin0, kmMax0] = readSliderRange('mileage');
+
+const applied = {
+  models: new Set(allModels),
+  sources: new Set(allSources),
+  yearMin: yearMin0, yearMax: yearMax0,
+  priceMin: priceMin0, priceMax: priceMax0,
+  kmMin: kmMin0, kmMax: kmMax0,
+};
+
 function rebuild() {
-  const active = new Set([...document.querySelectorAll('.controls input[data-source]')].filter(c => c.checked).map(c => c.dataset.source));
   Object.values(datasets).forEach(ds => {
     ds.data = []; ds.meta = []; ds.backgroundColor = []; ds.borderColor = [];
     ds.pointRadius = []; ds.pointHoverRadius = []; ds.pointBorderColor = []; ds.pointBorderWidth = [];
   });
   data.forEach(d => {
-    if (!active.has(normSource(d.source))) return;
+    if (!applied.sources.has(normSource(d.source))) return;
+    if (!applied.models.has(d.model)) return;
+    if (d.year < applied.yearMin || d.year > applied.yearMax) return;
+    if (d.price_cad < applied.priceMin || d.price_cad > applied.priceMax) return;
+    if (d.mileage_km < applied.kmMin || d.mileage_km > applied.kmMax) return;
     const ds = datasets[d.model];
     if (!ds) return;
     ds.data.push({ x: d.mileage_km, y: d.price_cad });
@@ -1683,15 +1849,180 @@ const chart = new Chart(ctx, {
   }
 });
 
-document.querySelectorAll('.controls input[data-model]').forEach(cb => {
+// ── Cars dropdown: tri-state hierarchy (All → Make → Model) ────────────
+function cssEscape(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : s.replace(/"/g, '\\\\"');
+}
+const allCb = document.querySelector('.all-cb');
+
+function syncMakeFromModels(makeName) {
+  const makeBox = document.querySelector('.make-cb[data-make="' + cssEscape(makeName) + '"]');
+  if (!makeBox) return;
+  const siblings = [...document.querySelectorAll('.model-cb[data-make="' + cssEscape(makeName) + '"]')];
+  const checked = siblings.filter(c => c.checked).length;
+  if (checked === 0) { makeBox.checked = false; makeBox.indeterminate = false; }
+  else if (checked === siblings.length) { makeBox.checked = true; makeBox.indeterminate = false; }
+  else { makeBox.checked = false; makeBox.indeterminate = true; }
+}
+function syncAllFromState() {
+  if (!allCb) return;
+  const total = allModels.size;
+  const picked = applied.models.size;
+  if (picked === 0) { allCb.checked = false; allCb.indeterminate = false; }
+  else if (picked === total) { allCb.checked = true; allCb.indeterminate = false; }
+  else { allCb.checked = false; allCb.indeterminate = true; }
+}
+function updateDropdownSummary(name) {
+  const dd = document.querySelector('.dropdown[data-dropdown="' + name + '"]');
+  if (!dd) return;
+  const summaryEl = dd.querySelector('.dd-summary');
+  if (name === 'cars') {
+    const total = allModels.size, picked = applied.models.size;
+    summaryEl.textContent = ' ' + (picked === total ? '(all)' : '(' + picked + '/' + total + ')');
+  } else if (name === 'source') {
+    const total = allSources.size, picked = applied.sources.size;
+    summaryEl.textContent = ' ' + (picked === total ? '(all)' : '(' + picked + '/' + total + ')');
+  }
+}
+function commitCars() {
+  syncAllFromState();
+  updateDropdownSummary('cars');
+  rebuild(); chart.update('none');
+}
+function commitSources() {
+  updateDropdownSummary('source');
+  rebuild(); chart.update('none');
+}
+
+if (allCb) {
+  allCb.addEventListener('change', () => {
+    const v = allCb.checked;
+    document.querySelectorAll('.model-cb').forEach(cb => {
+      cb.checked = v;
+      if (v) applied.models.add(cb.dataset.model); else applied.models.delete(cb.dataset.model);
+    });
+    document.querySelectorAll('.make-cb').forEach(cb => {
+      cb.checked = v; cb.indeterminate = false;
+    });
+    allCb.indeterminate = false;
+    commitCars();
+  });
+}
+
+document.querySelectorAll('.make-cb').forEach(cb => {
   cb.addEventListener('change', () => {
-    const idx = chart.data.datasets.findIndex(ds => ds.label === cb.dataset.model);
-    if (idx >= 0) { chart.setDatasetVisibility(idx, cb.checked); chart.update(); }
+    const make = cb.dataset.make;
+    document.querySelectorAll('.model-cb[data-make="' + cssEscape(make) + '"]').forEach(m => {
+      m.checked = cb.checked;
+      if (cb.checked) applied.models.add(m.dataset.model); else applied.models.delete(m.dataset.model);
+    });
+    cb.indeterminate = false;
+    commitCars();
   });
 });
-document.querySelectorAll('.controls input[data-source]').forEach(cb => {
-  cb.addEventListener('change', () => { rebuild(); chart.update(); });
+document.querySelectorAll('.model-cb').forEach(cb => {
+  cb.addEventListener('change', () => {
+    if (cb.checked) applied.models.add(cb.dataset.model); else applied.models.delete(cb.dataset.model);
+    syncMakeFromModels(cb.dataset.make);
+    commitCars();
+  });
 });
+document.querySelectorAll('.source-cb').forEach(cb => {
+  cb.addEventListener('change', () => {
+    if (cb.checked) applied.sources.add(cb.dataset.source); else applied.sources.delete(cb.dataset.source);
+    commitSources();
+  });
+});
+
+// ── Dropdown open/close (no commit step — changes are live) ──────────
+document.querySelectorAll('.dropdown').forEach(dd => {
+  const toggle = dd.querySelector('.dd-toggle');
+  toggle.addEventListener('click', e => {
+    e.stopPropagation();
+    const wasOpen = dd.classList.contains('open');
+    document.querySelectorAll('.dropdown.open').forEach(o => o.classList.remove('open'));
+    if (!wasOpen) dd.classList.add('open');
+  });
+  dd.querySelector('.dd-panel').addEventListener('click', e => e.stopPropagation());
+});
+document.addEventListener('click', e => {
+  if (e.target.closest('.dropdown')) return;
+  document.querySelectorAll('.dropdown.open').forEach(o => o.classList.remove('open'));
+});
+updateDropdownSummary('cars');
+updateDropdownSummary('source');
+syncAllFromState();
+
+// ── Sliders: dual-handle ranges with live chart updates ───────────────
+const SLIDER_FORMATTERS = {
+  year: v => String(v),
+  price: v => '$' + Math.round(v).toLocaleString(),
+  mileage: v => Math.round(v / 1000) + 'k km',
+};
+// Rescale x/y to hug currently-visible data with a small pad. Only triggered
+// when the user *releases* a slider, so the axes stay stable mid-drag and
+// snap on commit. Year is included because narrowing year often eliminates
+// the cheapest / most expensive listings, which leaves dead space on the
+// price axis (same logic for mileage when a year cohort skews younger).
+function rescaleAxes() {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  Object.values(datasets).forEach(ds => {
+    ds.data.forEach(p => {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    });
+  });
+  if (!isFinite(minX)) return; // no visible points — leave axes alone
+  const padX = Math.max(1, (maxX - minX) * 0.04);
+  const padY = Math.max(1, (maxY - minY) * 0.04);
+  chart.options.scales.x.min = Math.floor(minX - padX);
+  chart.options.scales.x.max = Math.ceil(maxX + padX);
+  chart.options.scales.y.min = Math.floor(minY - padY);
+  chart.options.scales.y.max = Math.ceil(maxY + padY);
+  chart.update();
+}
+function setupSlider(name) {
+  const group = sliderEl(name);
+  if (!group) return;
+  const lo = group.querySelector('.slider-min');
+  const hi = group.querySelector('.slider-max');
+  const display = group.querySelector('.slider-display');
+  const trackActive = group.querySelector('.track-active');
+  const fmt = SLIDER_FORMATTERS[name];
+  const fullLo = parseFloat(lo.min);
+  const fullHi = parseFloat(lo.max);
+  const span = fullHi - fullLo;
+  function refresh() {
+    let minV = parseFloat(lo.value);
+    let maxV = parseFloat(hi.value);
+    if (minV > maxV) {
+      // Whichever handle is being dragged stays put; the other yields.
+      if (document.activeElement === lo) { hi.value = minV; maxV = minV; }
+      else { lo.value = maxV; minV = maxV; }
+    }
+    display.textContent = fmt(minV) + ' – ' + fmt(maxV);
+    if (span > 0) {
+      const leftPct = ((minV - fullLo) / span) * 100;
+      const rightPct = ((maxV - fullLo) / span) * 100;
+      trackActive.style.left = leftPct + '%';
+      trackActive.style.right = (100 - rightPct) + '%';
+    }
+    if (name === 'year') { applied.yearMin = minV; applied.yearMax = maxV; }
+    else if (name === 'price') { applied.priceMin = minV; applied.priceMax = maxV; }
+    else if (name === 'mileage') { applied.kmMin = minV; applied.kmMax = maxV; }
+    rebuild(); chart.update('none');
+  }
+  lo.addEventListener('input', refresh);
+  hi.addEventListener('input', refresh);
+  lo.addEventListener('change', rescaleAxes);
+  hi.addEventListener('change', rescaleAxes);
+  refresh();
+}
+setupSlider('year');
+setupSlider('price');
+setupSlider('mileage');
 </script>
 
 </body>
@@ -1771,9 +2102,13 @@ def _scrape_facebook(cfg: Config, scrape_num: int, scrape_time: str,
         log("No FB queries configured — skipping Facebook scrape")
         return
     reset_card_trace()
+    # Per-profile state file: profiles share the repo but must not share the
+    # last-scrape timestamp, or one profile's recent run silently narrows the
+    # other's lookback window.
+    state_path = f".fb_scrape_state.{cfg.profile_name}.json"
     # Snapshot the last-scrape timestamp ONCE — so every vehicle in this run
     # uses the same daysSinceListed window (computed from the prior run's end).
-    session_last_ts = load_fb_scrape_state().get("last_fb_scrape_timestamp")
+    session_last_ts = load_fb_scrape_state(state_path).get("last_fb_scrape_timestamp")
     allowed_provinces = {cfg.filters.province} if cfg.filters.province else None
     driver = create_fb_driver(headless=False)
     try:
@@ -1784,6 +2119,7 @@ def _scrape_facebook(cfg: Config, scrape_num: int, scrape_time: str,
                 model_regex_src=q.regex, model_canonical=q.model_canonical,
                 make=q.make,
                 output_file=cfg.output.csv, scrape_num=scrape_num, scrape_time=scrape_time,
+                max_days_since_listed=cfg.fb_defaults.days_since_listed,
                 max_listings=max_listings, year_range=q.year_range,
                 max_price=cfg.fb_defaults.price_max,
                 min_price=cfg.fb_defaults.price_min,
@@ -1797,7 +2133,201 @@ def _scrape_facebook(cfg: Config, scrape_num: int, scrape_time: str,
         except Exception:
             pass
     # Persist the run's end time ONCE so the next run's window starts here.
-    save_fb_scrape_state({"last_fb_scrape_timestamp": scrape_time})
+    save_fb_scrape_state({"last_fb_scrape_timestamp": scrape_time}, state_path)
+
+
+# Makes whose relevant lineup is essentially all-AWD, so cross-import doesn't
+# require an explicit AWD keyword in the listing text. Subaru sells the BRZ as
+# RWD but it's a coupe — won't appear in any of our SUV/used-AWD searches.
+_AWD_BY_DEFAULT_MAKES = {"Subaru"}
+_AWD_KEYWORD_RE = re.compile(r"awd|4wd|4x4|all.?wheel", re.IGNORECASE)
+_MODEL_NORMALIZE_RE = re.compile(r"[\s\-]+")
+
+
+def _normalize_model(s: object) -> str:
+    if s is None:
+        return ""
+    return _MODEL_NORMALIZE_RE.sub("", str(s).strip().lower())
+
+
+def _row_matches_scrape_params(row: pd.Series, cfg: Config) -> bool:
+    """True if a CSV row from another profile satisfies our scrape filters.
+
+    Filters: province, year_min, price range, make+model coverage by our
+    search_units, and (if our profile sets ``extra_params.dtrain == 'A'``) an
+    AWD signal — either the make is in ``_AWD_BY_DEFAULT_MAKES`` or one of
+    title / description / model_version / safety_equipment / comfort_equipment
+    contains an AWD keyword.
+    """
+    if cfg.filters.province:
+        if str(row.get("province", "") or "").strip() != cfg.filters.province:
+            return False
+
+    try:
+        year = int(row["year"])
+    except (TypeError, ValueError, KeyError):
+        return False
+    if year < cfg.autotrader_search.year_min:
+        return False
+
+    try:
+        price = float(row["price_cad"])
+    except (TypeError, ValueError, KeyError):
+        return False
+    if price < cfg.autotrader_search.price_min or price > cfg.autotrader_search.price_max:
+        return False
+
+    row_make = str(row.get("make", "") or "").strip()
+    if not row_make:
+        return False
+    row_model_n = _normalize_model(row.get("model"))
+    matched = False
+    for u in cfg.search_units:
+        if u.make.capitalize() != row_make:
+            continue
+        if u.model is None:
+            matched = True
+            break
+        if row_model_n and _normalize_model(u.model) == row_model_n:
+            matched = True
+            break
+    if not matched:
+        return False
+
+    if cfg.autotrader_search.extra_params.get("dtrain") == "A":
+        if row_make not in _AWD_BY_DEFAULT_MAKES:
+            blob = " ".join(
+                str(row.get(f, "") or "")
+                for f in ("title", "description", "model_version",
+                          "safety_equipment", "comfort_equipment")
+            )
+            if not _AWD_KEYWORD_RE.search(blob):
+                return False
+
+    return True
+
+
+def _discover_other_profiles(current_cfg_path: str, current_profile_name: str
+                             ) -> List[Tuple[str, Config]]:
+    """Return ``(yaml_path, Config)`` tuples for every parseable profile in
+    cwd whose ``profile_name`` differs from ours."""
+    out: List[Tuple[str, Config]] = []
+    current_abs = os.path.abspath(current_cfg_path)
+    for path in sorted(glob.glob("*.yaml")):
+        if os.path.abspath(path) == current_abs:
+            continue
+        try:
+            other = load_config(path)
+        except Exception as e:
+            log(f"Cross-import: skipping {path} (load error: {e})")
+            continue
+        if other.profile_name == current_profile_name:
+            continue
+        out.append((path, other))
+    return out
+
+
+def _cross_profile_import(cfg: Config, args_config: str,
+                          scrape_num: int, scrape_time: str) -> int:
+    """Import rows from other profiles' CSVs that match our scrape parameters.
+
+    Saves AT detail-page (and FB) queries for listings already parsed by another
+    profile — the goal is fewer outbound requests and a smaller anti-bot
+    footprint. Imported rows preserve the source profile's
+    ``last_scrape_timestamp`` so the resurrection / deletion logic continues to
+    behave correctly. Rows already in our CSV (matched by ``url``, with
+    ``ad_id`` as a secondary key for FB rows) are skipped.
+
+    Runs BEFORE the AT/FB scrapes so the in-progress scrape sees the imported
+    rows and can refresh them via the URL-already-known fast path.
+    """
+    others = _discover_other_profiles(args_config, cfg.profile_name)
+    if not others:
+        return 0
+
+    if os.path.exists(cfg.output.csv):
+        try:
+            target = pd.read_csv(cfg.output.csv)
+        except pd.errors.EmptyDataError:
+            target = pd.DataFrame()
+    else:
+        target = pd.DataFrame()
+
+    seen_urls: Set[str] = (
+        set(target["url"].dropna().astype(str)) if "url" in target.columns else set()
+    )
+    seen_ad_ids: Set[str] = (
+        set(target["ad_id"].dropna().astype(str)) if "ad_id" in target.columns else set()
+    )
+
+    imported_frames: List[pd.DataFrame] = []
+    for path, other_cfg in others:
+        if not os.path.exists(other_cfg.output.csv):
+            log(f"Cross-import: {other_cfg.profile_name} has no CSV yet — skipping")
+            continue
+        try:
+            src = pd.read_csv(other_cfg.output.csv)
+        except pd.errors.EmptyDataError:
+            continue
+
+        # Skip rows the source has already marked deleted.
+        if "is_deleted" in src.columns:
+            src = src[src["is_deleted"].isna()]
+        if src.empty:
+            continue
+
+        keep_mask = src.apply(lambda r: _row_matches_scrape_params(r, cfg), axis=1)
+        candidates = src[keep_mask]
+
+        # Drop ones already in our CSV (by url, with ad_id as secondary key).
+        if "url" in candidates.columns and seen_urls:
+            candidates = candidates[~candidates["url"].astype(str).isin(seen_urls)]
+        if "ad_id" in candidates.columns and seen_ad_ids:
+            ad_id_str = candidates["ad_id"].astype(str)
+            candidates = candidates[
+                candidates["ad_id"].isna() | ~ad_id_str.isin(seen_ad_ids)
+            ]
+
+        if candidates.empty:
+            log(f"Cross-import: {other_cfg.profile_name} → {cfg.profile_name}: "
+                f"0 new rows after filter")
+            continue
+
+        # Tag with our run identifiers; preserve last_scrape_timestamp from source.
+        copy = candidates.copy()
+        copy["scrape_number"] = scrape_num
+        copy["scrape_timestamp"] = scrape_time
+
+        imported_frames.append(copy)
+        if "url" in copy.columns:
+            seen_urls.update(copy["url"].dropna().astype(str))
+        if "ad_id" in copy.columns:
+            seen_ad_ids.update(copy["ad_id"].dropna().astype(str))
+
+        by_source = (
+            copy["source"].value_counts().to_dict() if "source" in copy.columns else {}
+        )
+        log(f"Cross-import: {other_cfg.profile_name} → {cfg.profile_name}: "
+            f"{len(copy)} new rows ({by_source})")
+
+    if not imported_frames:
+        return 0
+
+    new_rows = pd.concat(imported_frames, ignore_index=True)
+    if not target.empty:
+        for c in target.columns:
+            if c not in new_rows.columns:
+                new_rows[c] = pd.NA
+        for c in new_rows.columns:
+            if c not in target.columns:
+                target[c] = pd.NA
+        combined = pd.concat([target, new_rows[target.columns]], ignore_index=True)
+    else:
+        combined = new_rows
+
+    combined.to_csv(cfg.output.csv, index=False)
+    log(f"Cross-import: total {len(new_rows)} rows merged into {cfg.output.csv}")
+    return len(new_rows)
 
 
 def _filter_units_by_arg(units: List[SearchUnit], slug: str) -> List[SearchUnit]:
@@ -1842,6 +2372,11 @@ def main() -> None:
                     scrape_num = int(existing_df["scrape_number"].max()) + 1
             except (pd.errors.EmptyDataError, KeyError, ValueError):
                 pass
+
+        # Pull in already-parsed listings from sibling profiles before scraping —
+        # rows that match our scrape parameters arrive without spending a
+        # detail-page request on AT or a card hydration on FB.
+        _cross_profile_import(cfg, args.config, scrape_num, scrape_time)
 
         if args.make_model:
             units = _filter_units_by_arg(cfg.search_units, args.make_model)
