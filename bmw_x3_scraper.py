@@ -366,33 +366,65 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
     return links
 
 
+def _read_search_page_count(driver: webdriver.Chrome) -> Optional[int]:
+    """Read total pages from ``window.__NEXT_DATA__.props.pageProps.numberOfPages``.
+
+    Returns None when the metadata is missing — typically because the session
+    landed on the Angular app (which has no __NEXT_DATA__). Callers fall back
+    to "stop when a page returns no new URLs" in that case.
+    """
+    try:
+        n = driver.execute_script(
+            "try { return window.__NEXT_DATA__.props.pageProps.numberOfPages; }"
+            " catch (e) { return null; }"
+        )
+        if isinstance(n, int) and n > 0:
+            return n
+    except Exception:
+        pass
+    return None
+
+
 def get_listing_urls(driver: webdriver.Chrome, search_url: str,
                      first_page_loaded: bool = False) -> List[str]:
-    """Return all vehicle listing URLs, paginating through results.
+    """Return all vehicle listing URLs across every page of the search.
 
-    Uses ``page=`` parameter (AutoScout24 platform) for pagination.
-    If *first_page_loaded* is True, collects links from the current page
-    first before advancing to page 2.
+    AT renders ~20 listings per search-results page regardless of ``rcp=``;
+    to capture everything matching the filter set we paginate via
+    ``&page=N``. The total page count is read from
+    ``__NEXT_DATA__.props.pageProps.numberOfPages`` after page 1 loads, so we
+    know exactly how many pages to fetch (e.g. 11 pages × 20 = 216 listings
+    for Émile's Subaru AWD search, rather than just the first 20).
     """
-    RESULTS_PER_PAGE = 100  # matches rcp=100 in COMMON_PARAMS
     all_links: Set[str] = set()
-    page = 1
+
+    if not first_page_loaded:
+        driver.get(search_url)
+    page1_links = _collect_page_links(driver)
+    all_links.update(page1_links)
+    log(f"  Page 1: {len(page1_links)} URLs")
+
+    total_pages = _read_search_page_count(driver)
+    if total_pages:
+        log(f"  Search reports {total_pages} total pages")
+    else:
+        log("  No numberOfPages metadata (Angular session?) — paginating until empty")
+
+    page = 2
     while True:
-        if page == 1 and first_page_loaded:
-            # Page already loaded by caller — just collect links
-            pass
-        else:
-            page_url = f"{search_url}&page={page}"
-            driver.get(page_url)
+        # Clean stop: we've reached the reported last page.
+        if total_pages and page > total_pages:
+            break
+        page_url = f"{search_url}&page={page}"
+        driver.get(page_url)
         page_links = _collect_page_links(driver)
         new_links = page_links - all_links
         if not new_links:
+            # Either we've passed the last page, or the page errored out.
+            log(f"  Page {page}: 0 new URLs — stopping")
             break
         all_links.update(new_links)
         log(f"  Page {page}: {len(new_links)} new URLs (total: {len(all_links)})")
-        # If this page returned fewer than a full page, there is no next page.
-        if len(page_links) < RESULTS_PER_PAGE:
-            break
         page += 1
     return list(all_links)
 
