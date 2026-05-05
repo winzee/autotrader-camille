@@ -1,0 +1,54 @@
+profile_name: camille
+
+output:
+  csv: used_suv_listings.csv
+  scatter_html: suv_scatter.html
+  log_dir: logs
+
+html:
+  page_title: "Used SUVs — Price vs Kilometres"
+  heading: "Camille's SUV Search"
+  public_url: "https://winzee.github.io/autotrader-camille/suv_scatter.html"
+  # chart axes auto-scale via 5/95-percentile bounds; uncomment to set hard caps:
+  # chart_price_max: 15000
+  # chart_price_floor: 4000
+
+github_pages:
+  enabled: true
+  repo: winzee/autotrader-camille
+
+filters:
+  province: QC
+
+autotrader:
+  enabled: true
+  search:
+    year_min: 2016
+    price_min: 0
+    price_max: 15000
+    radius_km: 300
+    postal_code: H1X 3J1
+    extra_params: {}
+  search_units:
+    - {make: subaru,  model: forester}
+    - {make: subaru,  model: outback}
+    - {make: subaru,  model: crosstrek}
+    - {make: toyota,  model: rav4}
+    - {make: honda,   model: hr-v}
+    - {make: honda,   model: cr-v}
+    - {make: hyundai, model: kona}
+
+facebook:
+  enabled: true
+  defaults:
+    price_min: 6000
+    price_max: 15000
+    days_since_listed: 90
+  queries:
+    - {make: subaru,  query: "subaru forester",  regex: "forester",     model_canonical: Forester,  year_range: [2016, 2099]}
+    - {make: subaru,  query: "subaru outback",   regex: "outback",      model_canonical: OUTBACK,   year_range: [2016, 2099]}
+    - {make: subaru,  query: "subaru crosstrek", regex: "crosstrek",    model_canonical: Crosstrek, year_range: [2016, 2099]}
+    - {make: toyota,  query: "toyota rav4",      regex: "rav[\\s-]?4",  model_canonical: "RAV 4",   year_range: [2016, 2099]}
+    - {make: honda,   query: "honda hr-v",       regex: "hr[\\s-]?v",   model_canonical: HR-V,      year_range: [2016, 2099]}
+    - {make: honda,   query: "honda cr-v",       regex: "cr[\\s-]?v",   model_canonical: CR-V,      year_range: [2016, 2099]}
+    - {make: hyundai, query: "hyundai kona",     regex: "kona",         model_canonical: KONA,      year_range: [2016, 2099]}

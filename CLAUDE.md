@@ -4,9 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Used-SUV scraper for the Montréal area, built to help shop for a sub-$15K SUV. Despite the legacy filename (`bmw_x3_scraper.py`), the scraper now covers seven make/models from AutoTrader.ca **and** Facebook Marketplace, writes to `used_suv_listings.csv`, and regenerates an interactive scatter plot (`suv_scatter.html`) that is pushed to GitHub Pages on every run (https://winzee.github.io/autotrader-camille/suv_scatter.html).
+Used-vehicle scraper for the Montréal area. Despite the legacy filename (`bmw_x3_scraper.py`), the scraper supports multiple **profiles** (one YAML per user) and pulls from AutoTrader.ca **and** Facebook Marketplace. Two profiles ship today:
 
-Vehicles tracked (defined in `VEHICLES` list): Subaru Forester / Outback / Crosstrek, Toyota RAV4, Honda HR-V / CR-V, Hyundai Kona.
+- **`camille.yaml`** — sub-$15K SUV search, 7 specific Japanese/Korean make/model pairs, year ≥ 2016, 300 km radius from H1X 3J1. Writes `used_suv_listings.csv` and `suv_scatter.html`. Pushed to https://winzee.github.io/autotrader-camille/suv_scatter.html.
+- **`emile.yaml`** — sub-$9K AWD search (no body-type/model filter; `dtrain=A` URL param), Japanese + Korean brands, year ≥ 2007, 200 km radius from H1X 3J1. Writes `emile_suv_listings.csv` and `emile_scatter.html`. Pushed to https://winzee.github.io/autotrader-camille/emile_scatter.html (same repo as Camille).
+
+Per-profile knobs (postal code, radius, price min/max, year min, province filter, vehicle list, FB queries, output paths, GitHub Pages target, HTML title/heading, scatter chart price floor/ceiling) all live in the YAML file. See `config.py` for the full schema.
 
 ## Commands
 
@@ -14,21 +17,32 @@ Vehicles tracked (defined in `VEHICLES` list): Subaru Forester / Outback / Cross
 source venv/bin/activate
 
 # Install dependencies (no requirements.txt — manual install)
-pip install selenium webdriver-manager beautifulsoup4 pandas
+pip install selenium webdriver-manager beautifulsoup4 pandas pyyaml
 
-# Full scrape: AutoTrader (7 vehicles) + Facebook + scatter HTML + git push
+# Full scrape with the default profile (camille.yaml)
 python bmw_x3_scraper.py
 
-# Single-vehicle dev runs
-python bmw_x3_scraper.py --make-model honda/cr-v
-python bmw_x3_scraper.py --generate-html-only   # rebuild plot only
+# Run with another profile
+python bmw_x3_scraper.py --config emile.yaml
+
+# Single-vehicle dev runs (matches against the active profile's search_units;
+# `make/model` for model-specific units or just `make` for make-only units)
+python bmw_x3_scraper.py --config camille.yaml --make-model honda/cr-v
+python bmw_x3_scraper.py --config emile.yaml   --make-model toyota
+
+# Rebuild the plot only (no scrape)
+python bmw_x3_scraper.py --config camille.yaml --generate-html-only
+
+# Skip the GitHub Pages push for either profile
+python bmw_x3_scraper.py --config emile.yaml --no-publish
 ```
 
 There are no tests, linters, or build steps. Run logs go to `logs/run_YYYY-MM-DD_HHMMSS.log` (per run, gitignored).
 
 ## Architecture
 
-Two-file scraper:
+Three-file scraper:
+- `config.py` — loads a YAML profile and exposes a typed `Config` dataclass.
 - `bmw_x3_scraper.py` (~1700 lines) — AutoTrader scrape, CSV merge, scatter generation, GitHub push, FB orchestration.
 - `fb_scraper.py` — Facebook Marketplace scraping (separate browser session, persistent profile under `fb_profile/`).
 
@@ -39,11 +53,12 @@ AT A/B-routes between two apps; both must be supported:
 - **Angular (legacy)**: `/a/<make>/<model>/…` URLs, exposes `window.ngVdpModel`. Parsed by `parse_ngvdp_model()`.
 
 Pipeline:
-1. `_collect_page_links()` — collects both `a[href*='/offers/']` and `a[href*='/a/']` anchors, then `scrape_vehicle()` post-filters by make/model slug via `_make_model_url_patterns()`.
+1. `_collect_page_links()` — collects both `a[href*='/offers/']` and `a[href*='/a/']` anchors, then `scrape_vehicle()` post-filters by `SearchUnit` (make + optional model) via `_make_model_url_patterns()`.
 2. `extract_listing_details()` is a tiered dispatcher: Tier 1a `__NEXT_DATA__`, Tier 1b `ngVdpModel`, Tier 2 BeautifulSoup on embedded `__NEXT_DATA__`. **All tiers must stay wired up** — recent breakage occurred when the `ngVdpModel` tier was accidentally dropped from the dispatcher.
-3. URL slug matching uses `_make_model_url_patterns()` which generates both `/a/<make>/<model>/` and `/offers/<make>-<model>-` plus an alt spelling that inserts a hyphen between letter+digit (so `rav4` also matches `rav-4` URLs).
+3. URL slug matching uses `_make_model_url_patterns()`. For model-specific units (Camille) it generates `/a/<make>/<model>/` and `/offers/<make>-<model>-` plus the rav4↔rav-4 alt spelling. For make-only units (Émile) it matches any `/a/<make>/` or `/offers/<make>-` URL — model filtering is replaced by URL params like `dtrain=A`.
+4. The AT search URL is built by `build_at_search_url(unit, cfg.autotrader_search)`. Search params come from `cfg.autotrader_search` (year, price min/max, radius, postal code) plus everything in `extra_params` (e.g. `{dtrain: A}`). When a unit has no model, the URL drops to `/cars/<make>/qc/montréal/`. AT 200s on this and applies `dtrain=A` correctly; the location/radius is honored via the browser session, not the URL params (AT redirects strip them).
 
-### CSV lifecycle (`used_suv_listings.csv`)
+### CSV lifecycle (per-profile, e.g. `used_suv_listings.csv` / `emile_suv_listings.csv`)
 
 Listings are never deleted from the CSV — they're flagged. Three relevant columns:
 - `scrape_timestamp` — when first scraped (immutable).
@@ -55,13 +70,13 @@ Each `scrape_vehicle()` call:
 2. **Resurrects** any matching URL whose `is_deleted` is set (clears it back to NaN).
 3. Marks newly-disappeared URLs as deleted **only if the scrape looks healthy**: `≥5 URLs scraped` AND (`existing_active < 3` OR `seen_count / existing_active ≥ 0.5`). Otherwise treated as a partial failure and skipped — protects against false-positive deletions when a single scrape misses listings.
 
-A final `province == "QC"` filter drops out-of-province listings; AT search radius leaks Ontario dealers, so this filter is load-bearing.
+A final `province == cfg.filters.province` filter drops out-of-province listings; AT search radius leaks Ontario dealers, so this filter is load-bearing. Set `filters.province: null` in the YAML to disable.
 
 `collapse_cross_source_duplicates()` runs after all sources to drop same-car-different-source duplicates by `(make, model, year, mileage_km, price_cad)`, preferring AutoTrader rows.
 
 ### Facebook path
 
-`fb_scraper.py` uses a **persistent Chrome profile** (`fb_profile/`) so login cookies survive between runs. Scrolls Marketplace search, applies regex+year filters per `FB_QUERIES`, hydrates each card, and merges into the same `used_suv_listings.csv`.
+`fb_scraper.py` uses a **persistent Chrome profile** (`fb_profile/`) so login cookies survive between runs. Scrolls Marketplace search, applies regex+year filters per `cfg.fb_queries`, hydrates each card, and merges into the profile's CSV. Each FB query has `query` (free-text), `regex` (title filter), `model_canonical` (CSV `model` value, may be null for generic searches like Émile's "awd"), `year_range`, and optional `make` (CSV `make` value; if null, the row's `make` is left blank).
 
 ## Data Reference
 
@@ -70,8 +85,16 @@ A final `province == "QC"` filter drops out-of-province listings; AT search radi
 
 ## Configuration
 
-Hardcoded in `main()`/`COMMON_PARAMS`/`VEHICLES`/`FB_QUERIES`:
-- Year ≥ 2016, max price $15K, radius 300 km from H1X 3J1, used only.
+All per-user knobs live in YAML profiles (`camille.yaml`, `emile.yaml`). See `config.py` for the full schema. Top-level sections:
+- `output` — CSV / scatter HTML / log directory paths.
+- `html` — page title, H1 heading, optional public URL link, scatter `chart_price_max` / `chart_price_floor`.
+- `github_pages` — `enabled: bool`; `repo: <user/repo>` when enabled. Multiple profiles can share one repo (each commits its own scatter HTML file).
+- `filters.province` — single-province filter (e.g. `QC`); `null` disables.
+- `autotrader.search` — `year_min`, `price_min`, `price_max`, `radius_km`, `postal_code`, `extra_params` (free-form dict appended to the AT URL — e.g. `{dtrain: A}` for AWD-only).
+- `autotrader.search_units` — list of `{make, model?}`. Omitting `model` searches all of that make's listings (combine with `extra_params` to filter further).
+- `facebook.defaults` and `facebook.queries` — FB-specific overrides; each query supports `make`, `model_canonical`, `query`, `regex`, `year_range`.
+
+Environmental constants still hardcoded:
 - Chrome binary: `/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`. Chrome for Testing must be installed locally.
 - `LISTING_PAUSE_SECS = 5` between detail extractions.
 

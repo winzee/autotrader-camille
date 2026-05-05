@@ -540,9 +540,11 @@ def extract_fb_details(driver, listing_id: str) -> VehicleListing:
 
 # ── End-to-end orchestrator (mirrors scrape_vehicle) ──────────────────────
 
-def scrape_vehicle_facebook(driver, make_model: str, query: str,
-                            model_regex_src: str, model_canonical: str,
+def scrape_vehicle_facebook(driver, query: str,
+                            model_regex_src: str,
+                            model_canonical: Optional[str],
                             output_file: str, scrape_num: int, scrape_time: str,
+                            make: Optional[str] = None,
                             max_listings: int = 10,
                             year_range: Optional[Tuple[int, int]] = None,
                             max_price: int = 15000,
@@ -550,12 +552,17 @@ def scrape_vehicle_facebook(driver, make_model: str, query: str,
                             min_price: int = 6000,
                             session_last_scrape_timestamp: Optional[str] = None,
                             days_override: Optional[int] = None) -> None:
-    """Scrape FB for one vehicle and merge into ``output_file`` CSV.
+    """Scrape FB for one query and merge into ``output_file`` CSV.
 
     Mirrors ``scrape_vehicle()`` for AutoTrader: loads existing CSV, collects
     fresh listings, dedups, merges with existing rows (marks vanished FB
-    rows for this model as deleted), and writes back.
+    rows for this query as deleted), and writes back.
+
+    ``model_canonical`` and ``make`` may be ``None`` for generic searches
+    (e.g. body-type or drivetrain queries that don't pin a make/model). The
+    CSV's ``make``/``model`` columns are left blank for those rows.
     """
+    log_id = model_canonical or query
     # Load existing CSV
     existing_df = None
     if os.path.exists(output_file):
@@ -586,9 +593,9 @@ def scrape_vehicle_facebook(driver, make_model: str, query: str,
         else:
             last_ts = load_fb_scrape_state().get("last_fb_scrape_timestamp")
         days = compute_days_since_listed(last_ts)
-    log(f"FB scrape: {make_model} (query={query!r}) max={max_listings} days={days} "
+    log(f"FB scrape: {log_id} (query={query!r}) max={max_listings} days={days} "
         f"seen_ad_ids={len(seen_ad_ids)}")
-    trace_section(f"{make_model} query={query!r} days={days}")
+    trace_section(f"{log_id} query={query!r} days={days}")
 
     # Collect cards
     model_regex = re.compile(model_regex_src, re.IGNORECASE)
@@ -625,9 +632,10 @@ def scrape_vehicle_facebook(driver, make_model: str, query: str,
             continue
 
         # Fill-in from card if detail extraction missed anything
-        listing.model = model_canonical
-        if "/" in make_model:
-            listing.make = make_model.split("/", 1)[0].capitalize()
+        if model_canonical:
+            listing.model = model_canonical
+        if make:
+            listing.make = make.capitalize()
         if listing.seller_name is None:
             listing.seller_name = card.get("seller_name")
         if listing.price_cad is None and card.get("price_str"):

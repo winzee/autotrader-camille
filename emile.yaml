@@ -1,0 +1,56 @@
+profile_name: emile
+
+output:
+  csv: emile_suv_listings.csv
+  scatter_html: emile_scatter.html
+  log_dir: logs
+
+html:
+  page_title: "Used AWD $3k–$9k — Émile's Search"
+  heading: "Émile's AWD Search"
+  public_url: "https://winzee.github.io/autotrader-camille/emile_scatter.html"
+  # chart axes auto-scale via 5/95-percentile bounds (no manual limits needed)
+
+github_pages:
+  enabled: true
+  repo: winzee/autotrader-camille   # same repo as Camille; separate HTML file
+
+filters:
+  province: QC
+
+autotrader:
+  enabled: true
+  search:
+    year_min: 2007
+    price_min: 3000
+    price_max: 9000
+    radius_km: 200
+    postal_code: H1X 3J1
+    extra_params:
+      dtrain: A                     # AWD-only filter
+  # Make-only search units (no model). AT returns all listings for the make,
+  # then dtrain=A narrows to AWD. Brand list = Japanese + Korean.
+  search_units:
+    - {make: toyota}
+    - {make: honda}
+    - {make: subaru}
+    - {make: mazda}
+    - {make: nissan}
+    - {make: mitsubishi}
+    - {make: suzuki}
+    - {make: lexus}
+    - {make: infiniti}
+    - {make: acura}
+    - {make: hyundai}
+    - {make: kia}
+    - {make: genesis}
+
+facebook:
+  enabled: true
+  defaults:
+    price_min: 3000
+    price_max: 9000
+    days_since_listed: 90
+  # Generic AWD query; model_canonical: null leaves CSV's `model` blank for FB rows.
+  queries:
+    - {query: "awd",   regex: "(awd|4wd|4x4|all.?wheel)",  model_canonical: null, year_range: [2007, 2099]}

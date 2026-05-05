@@ -114,7 +114,10 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 import os
 import subprocess
+import urllib.parse
 from typing import List, Dict, Any, Optional, Set, Tuple, IO
+
+from config import Config, SearchUnit, AutotraderSearch, load_config
 
 
 # ── Run-log tee ──────────────────────────────────────────────────────────
@@ -869,56 +872,68 @@ def deduplicate_listings(listings: List[VehicleListing]) -> List[VehicleListing]
 
 
 # ── Search configurations ────────────────────────────────────────────────
-# Each entry: (make/model URL path, output CSV filename)
-OUTPUT_FILE = "used_suv_listings.csv"
-
-VEHICLES = [
-    "subaru/forester",
-    "subaru/outback",
-    "subaru/crosstrek",
-    "toyota/rav4",
-    "honda/hr-v",
-    "honda/cr-v",
-    "hyundai/kona",
-]
-
-# Per-vehicle Facebook Marketplace search config. Keyed by AutoTrader slug.
-#   query:            free-text search term (FB filter-by-make is unreliable)
-#   regex:            case-insensitive regex applied to the listing title
-#   model_canonical:  model string to write into the ``model`` column
-#   year_range:       (min, max) year kept
-FB_QUERIES: Dict[str, Dict[str, Any]] = {
-    "subaru/forester": {"query": "subaru forester",  "regex": r"forester",   "model_canonical": "Forester", "year_range": (2016, 2099)},
-    "subaru/outback":   {"query": "subaru outback",   "regex": r"outback",    "model_canonical": "OUTBACK",    "year_range": (2016, 2099)},
-    "subaru/crosstrek": {"query": "subaru crosstrek", "regex": r"crosstrek",  "model_canonical": "Crosstrek", "year_range": (2016, 2099)},
-    "toyota/rav4":      {"query": "toyota rav4",      "regex": r"rav[\s-]?4", "model_canonical": "RAV 4",     "year_range": (2016, 2099)},
-    "honda/hr-v":      {"query": "honda hr-v",       "regex": r"hr[\s-]?v",  "model_canonical": "HR-V",     "year_range": (2016, 2099)},
-    "honda/cr-v":      {"query": "honda cr-v",       "regex": r"cr[\s-]?v",  "model_canonical": "CR-V",     "year_range": (2016, 2099)},
-    "hyundai/kona":    {"query": "hyundai kona",     "regex": r"kona",       "model_canonical": "KONA",     "year_range": (2016, 2099)},
-}
-
-COMMON_PARAMS = (
-    "?rcp=100"          # results per page (max 100)
-    "&yRng=2016%2C"     # year 2016+
-    "&priceto=15000"    # max price (AutoScout24 param)
-    "&prx=300"          # radius in km
-    "&loc=H1X%203J1"    # postal code
-    "&sts=Used"         # used vehicles only
-)
+# Per-user knobs (vehicle list, FB queries, search filters, output paths,
+# GitHub Pages target) live in YAML profiles loaded by ``config.py``. See
+# ``camille.yaml`` and ``emile.yaml``.
 
 
+def _at_common_params(search: AutotraderSearch) -> str:
+    """Build the AT search query string from the loaded config.
 
-def _make_model_url_patterns(make_model: str) -> List[str]:
-    """Return the substrings that identify URLs for a given make_model slug.
+    Always includes ``rcp=100`` and ``sts=Used``. Adds ``pricefrom`` only when
+    ``price_min > 0``. Any entries in ``search.extra_params`` are appended
+    verbatim (e.g. ``dtrain=A`` for AWD-only).
+    """
+    parts = [
+        "rcp=100",
+        f"yRng={urllib.parse.quote(str(search.year_min) + ',')}",
+        f"priceto={search.price_max}",
+        f"prx={search.radius_km}",
+        f"loc={urllib.parse.quote(search.postal_code)}",
+        "sts=Used",
+    ]
+    if search.price_min and search.price_min > 0:
+        parts.append(f"pricefrom={search.price_min}")
+    for key, value in search.extra_params.items():
+        parts.append(f"{key}={urllib.parse.quote(str(value))}")
+    return "?" + "&".join(parts)
+
+
+def build_at_search_url(unit: SearchUnit, search: AutotraderSearch) -> str:
+    """Build the AT search URL for a single (make, optional-model) unit.
+
+    Camille's profile uses ``/cars/<make>/<model>/qc/montréal/`` as before;
+    Émile's profile (model omitted) uses ``/cars/<make>/qc/montréal/``.
+    """
+    if unit.model:
+        path = f"{unit.make}/{unit.model}"
+    else:
+        path = unit.make
+    return (
+        f"https://www.autotrader.ca/cars/{path}/qc/montr%c3%a9al/"
+        + _at_common_params(search)
+    )
+
+
+def _make_model_url_patterns(unit: SearchUnit) -> List[str]:
+    """Return the substrings that identify URLs for a given search unit.
 
     AT's listing URLs come in two flavours (Next.js ``/offers/<make>-<model>-``
     and Angular ``/a/<make>/<model>/``) and the ``<model>`` part can be spelled
     differently from our search slug — most notably ``rav4`` vs ``rav-4``. We
     generate both spellings so the scraper recognises every valid listing URL
     and the deletion logic can correctly compare against the existing CSV.
+
+    When ``unit.model`` is omitted (make-only search), the patterns match any
+    listing under that make regardless of model.
     """
-    mm_slash = make_model.lower()
-    mm_dash = make_model.replace("/", "-").lower()
+    make = unit.make.lower()
+    if not unit.model:
+        return sorted({f"/a/{make}/", f"/offers/{make}-"})
+
+    model = unit.model.lower()
+    mm_slash = f"{make}/{model}"
+    mm_dash = f"{make}-{model}"
     patterns = {
         f"/a/{mm_slash}/",
         f"/offers/{mm_dash}-",
@@ -936,8 +951,9 @@ def _make_model_url_patterns(make_model: str) -> List[str]:
 
 
 def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
-                   make_model: str, output_file: str,
+                   unit: SearchUnit, output_file: str,
                    scrape_num: int, scrape_time: str,
+                   province_filter: Optional[str] = None,
                    first_page_loaded: bool = False) -> None:
     """Scrape listings for a single vehicle search and save to CSV.
 
@@ -966,7 +982,7 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
     # Restrict to URLs that actually belong to this make/model. The page-level
     # /a/ selector picks up unrelated anchors (related vehicles, navigation,
     # popular searches), so filter both URL flavours by the expected slug.
-    url_patterns = _make_model_url_patterns(make_model)
+    url_patterns = _make_model_url_patterns(unit)
     urls = [u for u in urls if any(p in u.lower() for p in url_patterns)]
     log(f"Found {len(urls)} vehicle URLs")
 
@@ -1053,9 +1069,8 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
         combined = new_df if not new_df.empty else pd.DataFrame()
 
     if not combined.empty:
-        # Keep only QC listings
-        if "province" in combined.columns:
-            combined = combined[combined["province"] == "QC"]
+        if province_filter and "province" in combined.columns:
+            combined = combined[combined["province"] == province_filter]
 
         cols = combined.columns.tolist()
         if "scrape_timestamp" in cols:
@@ -1066,11 +1081,6 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
 
     combined.to_csv(output_file, index=False)
     log(f"Data saved to {output_file}")
-
-
-SCATTER_HTML = "suv_scatter.html"
-GITHUB_REPO = "winzee/autotrader-camille"
-PAGES_URL = f"https://winzee.github.io/autotrader-camille/{SCATTER_HTML}"
 
 
 def collapse_cross_source_duplicates(csv_file: str) -> int:
@@ -1159,17 +1169,120 @@ def collapse_cross_source_duplicates(csv_file: str) -> int:
     return removed
 
 
+_SCATTER_SHAPE_POOL = [
+    "circle", "rectRot", "triangle", "rect", "rectRounded",
+    "star", "cross", "crossRot", "dash", "line",
+]
+# Chart.js draws these point styles as stroke-only (no fill). They render at
+# 0px without borderWidth, so we must give every stroked shape a real line
+# weight — otherwise the model's label appears on the chart with no glyph
+# under it. Filled shapes (circle/rect/rectRounded/rectRot/triangle) are
+# unaffected.
+_SCATTER_LINE_SHAPES = ["star", "cross", "crossRot", "dash", "line"]
+
+
+def _shape_svg(shape: str) -> str:
+    """Return an inline SVG icon matching a Chart.js pointStyle."""
+    fills = 'fill="#7f8c8d" stroke="#fff" stroke-width="1"'
+    strokes = 'stroke="#7f8c8d" stroke-width="2"'
+    svgs = {
+        "circle":      f'<circle cx="7" cy="7" r="5" {fills}/>',
+        "rectRot":     f'<polygon points="2,7 7,2 12,7 7,12" {fills}/>',
+        "triangle":    f'<polygon points="7,2 13,12 1,12" {fills}/>',
+        "rect":        f'<rect x="2" y="2" width="10" height="10" {fills}/>',
+        "rectRounded": f'<rect x="2" y="2" width="10" height="10" rx="3" {fills}/>',
+        "star":        '<polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" '
+                       'fill="#7f8c8d" stroke="#fff" stroke-width="1"/>',
+        "cross":       f'<line x1="7" y1="2" x2="7" y2="12" {strokes}/>'
+                       f'<line x1="2" y1="7" x2="12" y2="7" {strokes}/>',
+        "crossRot":    f'<line x1="2" y1="2" x2="12" y2="12" {strokes}/>'
+                       f'<line x1="2" y1="12" x2="12" y2="2" {strokes}/>',
+        "dash":        '<rect x="2" y="6" width="10" height="2" fill="#7f8c8d"/>',
+        "line":        f'<line x1="2" y1="7" x2="12" y2="7" {strokes}/>',
+    }
+    return f'<svg width="14" height="14">{svgs.get(shape, svgs["circle"])}</svg>'
+
+
+def _iqr_fences(series: pd.Series, k: float = 3.0) -> Tuple[float, float]:
+    """Tukey fences at k×IQR — used to drop only *extreme* outliers.
+
+    k=1.5 is the textbook "outlier" threshold but cuts into legitimate
+    cheap/high-km listings on small samples. k=3 is the textbook "extreme
+    outlier" threshold; it catches things like a $5 broken-car listing or
+    a $32k Subaru that slipped past the price filter, without trimming
+    real budget-end deals.
+    """
+    if series.empty:
+        return float("-inf"), float("inf")
+    q1 = float(series.quantile(0.25))
+    q3 = float(series.quantile(0.75))
+    iqr = q3 - q1
+    return q1 - k * iqr, q3 + k * iqr
+
+
+def _axis_bounds(series: pd.Series, pad_factor: float = 0.04,
+                 hard_min: Optional[float] = None,
+                 hard_max: Optional[float] = None) -> Tuple[float, float]:
+    """Axis bounds = data range + small padding, optionally clamped.
+
+    Run AFTER outlier filtering so the chart hugs the bulk of the data.
+    """
+    if series.empty:
+        return (float(hard_min) if hard_min is not None else 0.0,
+                float(hard_max) if hard_max is not None else 1.0)
+    lo, hi = float(series.min()), float(series.max())
+    pad = max(hi - lo, 1.0) * pad_factor
+    lo -= pad
+    hi += pad
+    lo = max(lo, 0.0)
+    if hard_min is not None:
+        lo = max(lo, float(hard_min))
+    if hard_max is not None:
+        hi = min(hi, float(hard_max))
+    return lo, hi
+
+
 def generate_scatter_html(csv_file: str, output_file: str,
-                          max_price: int = 15000,
-                          max_km: int = 200000) -> None:
-    """Read the CSV and generate an interactive scatter plot HTML file."""
+                          cfg: Optional["Config"] = None) -> None:
+    """Read the CSV and generate an interactive scatter plot HTML file.
+
+    Axis bounds and outlier filtering are derived from the data via 5th/95th
+    percentiles (clamped by ``cfg.html.chart_price_max`` / ``chart_price_floor``
+    when set), so each profile gets a chart sized to the bulk of its listings
+    instead of being skewed by damaged-car outliers or 500k-km lemons.
+
+    Models, datasets, and legend checkboxes are also derived from the data —
+    no hardcoded model whitelist.
+    """
+    if cfg is None:
+        # Loaded directly (e.g. from a one-off script). Default to Camille's profile.
+        cfg = load_config("camille.yaml")
     df = pd.read_csv(csv_file)
-    # Filter: active listings, within thresholds, known makes
     df = df[df["is_deleted"].isna()]
-    df = df[(df["price_cad"] <= max_price) & (df["mileage_km"] <= max_km)]
-    df = df[df["make"].isin(["Subaru", "Toyota", "Honda", "Hyundai"])]
-    if "province" in df.columns:
-        df = df[df["province"] != "ON"]
+    df = df.dropna(subset=["price_cad", "mileage_km", "model"])
+
+    profile_makes = {u.make.capitalize() for u in cfg.search_units}
+    if profile_makes:
+        df = df[df["make"].isin(profile_makes)]
+    if cfg.filters.province and "province" in df.columns:
+        df = df[df["province"] == cfg.filters.province]
+
+    # Drop only *extreme* outliers (3×IQR — broken-car $5 listings, $32k
+    # over-budget cars that slipped past the URL filter, etc.). Real
+    # budget-end deals stay in.
+    price_fence_lo, price_fence_hi = _iqr_fences(df["price_cad"])
+    km_fence_lo, km_fence_hi = _iqr_fences(df["mileage_km"])
+    df = df[(df["price_cad"] >= price_fence_lo) & (df["price_cad"] <= price_fence_hi)
+            & (df["mileage_km"] >= km_fence_lo) & (df["mileage_km"] <= km_fence_hi)]
+
+    # Axis bounds hug the surviving data range (no wasted whitespace),
+    # honouring optional hard caps from the YAML if set.
+    price_lo, price_hi = _axis_bounds(
+        df["price_cad"],
+        hard_min=cfg.html.chart_price_floor,
+        hard_max=cfg.html.chart_price_max,
+    )
+    km_lo, km_hi = _axis_bounds(df["mileage_km"])
 
     # Freshness tiers: "latest" (last scrape), "recent" (today/yesterday), "old"
     scrape_nums = df["scrape_number"].dropna().unique()
@@ -1178,19 +1291,8 @@ def generate_scatter_html(csv_file: str, output_file: str,
     today = datetime.now().date()
     yesterday = today - __import__("datetime").timedelta(days=1)
 
-    MODEL_DISPLAY = {
-        "CR-V": "CR-V",
-        "HR-V": "HR-V",
-        "KONA": "Kona",
-        "Crosstrek": "Crosstrek",
-        "Forester": "Forester",
-        "OUTBACK": "Outback",
-        "RAV 4": "RAV4",
-    }
-
     records = []
     for _, row in df.iterrows():
-        # Determine freshness tier
         is_latest = has_multiple and int(row["scrape_number"]) == int(max_scrape)
         scrape_date = None
         if pd.notna(row.get("scrape_timestamp")):
@@ -1207,15 +1309,10 @@ def generate_scatter_html(csv_file: str, output_file: str,
         else:
             freshness = "old"
 
-        model_raw = row["model"] if pd.notna(row.get("model")) else ""
-        model_display = MODEL_DISPLAY.get(model_raw)
-        if not model_display:
-            continue
-
         records.append({
             "source": str(row["source"]).lower() if pd.notna(row.get("source")) else "autotrader",
             "make": row["make"],
-            "model": model_display,
+            "model": str(row["model"]),
             "year": int(row["year"]) if pd.notna(row["year"]) else 0,
             "mileage_km": int(row["mileage_km"]) if pd.notna(row["mileage_km"]) else 0,
             "price_cad": int(row["price_cad"]) if pd.notna(row["price_cad"]) else 0,
@@ -1239,22 +1336,54 @@ def generate_scatter_html(csv_file: str, output_file: str,
             "model_version": row["model_version"] if pd.notna(row.get("model_version")) else "",
         })
 
+    # Per-model dataset metadata, ordered by frequency so the most common
+    # models get the most distinctive shapes.
+    model_counts = df["model"].value_counts() if not df.empty else pd.Series(dtype=int)
+    model_order = list(model_counts.index)
+    model_shapes = {m: _SCATTER_SHAPE_POOL[i % len(_SCATTER_SHAPE_POOL)]
+                    for i, m in enumerate(model_order)}
+
+    model_controls_html = "\n  ".join(
+        f'<label><input type="checkbox" checked data-model="{m}"> '
+        f'{_shape_svg(model_shapes[m])} {m}</label>'
+        for m in model_order
+    )
+    shapes_js = json.dumps(model_shapes, ensure_ascii=False)
+    line_shapes_js = json.dumps(_SCATTER_LINE_SHAPES)
+
     json_data = json.dumps(records, ensure_ascii=False)
-    y_min = int(df.loc[df["price_cad"] >= 4000, "price_cad"].min() - 200) if not df.empty else 0
+    x_min = int(km_lo)
+    y_min = int(price_lo)
+
+    page_title_html = (cfg.html.page_title or "")\
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    heading_html = (cfg.html.heading or "")\
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    if cfg.html.public_url:
+        live_link_html = (
+            f'<a class="live-link" href="{cfg.html.public_url}" '
+            f'target="_blank">view live</a>'
+        )
+    else:
+        live_link_html = ""
 
     html = '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Used SUVs — Price vs Kilometres</title>
+<title>''' + page_title_html + '''</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; height: 100dvh; }
   body { font-family: -apple-system, system-ui, sans-serif; background: #1a1a2e; color: #eee; padding: 12px; display: flex; flex-direction: column; }
-  .controls { display: flex; justify-content: center; gap: 20px; margin-bottom: 8px; font-size: 0.9rem; }
+  .heading { display: flex; align-items: baseline; justify-content: center; gap: 12px; margin-bottom: 6px; }
+  .heading h1 { font-size: 1.05rem; font-weight: 600; color: #eee; }
+  .heading .live-link { color: #3498db; font-size: 0.78rem; text-decoration: none; }
+  .heading .live-link:hover { text-decoration: underline; }
+  .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; margin-bottom: 8px; font-size: 0.9rem; }
   .controls label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
   .controls svg { vertical-align: middle; }
   .chart-wrap { flex: 1; min-height: 300px; position: relative; background: #16213e; border-radius: 12px; padding: 12px; }
@@ -1280,14 +1409,13 @@ def generate_scatter_html(csv_file: str, output_file: str,
 </head>
 <body>
 
+<div class="heading">
+  <h1>''' + heading_html + '''</h1>
+  ''' + live_link_html + '''
+</div>
+
 <div class="controls">
-  <label><input type="checkbox" checked data-model="Forester"> <svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Forester</label>
-  <label><input type="checkbox" checked data-model="Outback"> <svg width="14" height="14"><polygon points="2,7 7,2 12,7 7,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Outback</label>
-  <label><input type="checkbox" checked data-model="RAV4"> <svg width="14" height="14"><polygon points="7,2 13,12 1,12" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> RAV4</label>
-  <label><input type="checkbox" checked data-model="HR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> HR-V</label>
-  <label><input type="checkbox" checked data-model="CR-V"> <svg width="14" height="14"><rect x="2" y="2" width="10" height="10" rx="3" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> CR-V</label>
-  <label><input type="checkbox" checked data-model="Kona"> <svg width="14" height="14"><polygon points="7,1 9,5 13,5.5 10,8.5 11,13 7,11 3,13 4,8.5 1,5.5 5,5" fill="#7f8c8d" stroke="#fff" stroke-width="1"/></svg> Kona</label>
-  <label><input type="checkbox" checked data-model="Crosstrek"> <svg width="14" height="14"><line x1="7" y1="2" x2="7" y2="12" stroke="#7f8c8d" stroke-width="2"/><line x1="2" y1="7" x2="12" y2="7" stroke="#7f8c8d" stroke-width="2"/></svg> Crosstrek</label>
+  ''' + model_controls_html + '''
   <span style="opacity:0.35">|</span>
   <label><input type="checkbox" checked data-source="autotrader"> AutoTrader</label>
   <label><input type="checkbox" checked data-source="facebook"> Facebook</label>
@@ -1319,7 +1447,9 @@ def generate_scatter_html(csv_file: str, output_file: str,
 </div>
 
 <script>
-const SHAPES = { 'Forester': 'circle', 'Outback': 'rectRot', 'RAV4': 'triangle', 'HR-V': 'rect', 'CR-V': 'rectRounded', 'Kona': 'star', 'Crosstrek': 'cross' };
+const SHAPES = ''' + shapes_js + ''';
+const LINE_SHAPES = new Set(''' + line_shapes_js + ''');
+const isLineShape = (model) => LINE_SHAPES.has(SHAPES[model]);
 const COLORS = { latest: '#ffd700', recent: '#2ecc71', old: '#7f8c8d' };
 const SIZES  = { latest: { r: 7, hr: 9, bw: 0 }, recent: { r: 7, hr: 9, bw: 0 }, old: { r: 7, hr: 9, bw: 0 } };
 const SOURCE_LABELS = { autotrader: 'AutoTrader', facebook: 'Facebook' };
@@ -1348,10 +1478,13 @@ function rebuild() {
     const c = COLORS[f], s = SIZES[f];
     ds.backgroundColor.push(c);
     ds.borderColor.push(c);
-    ds.pointRadius.push(s.r);
-    ds.pointHoverRadius.push(s.hr);
+    // Stroke-only shapes need bigger radius + thicker stroke to read at the
+    // same visual weight as filled shapes.
+    const stroked = isLineShape(d.model);
+    ds.pointRadius.push(stroked ? s.r + 1 : s.r);
+    ds.pointHoverRadius.push(stroked ? s.hr + 1 : s.hr);
     ds.pointBorderColor.push(c);
-    ds.pointBorderWidth.push(['star', 'cross'].includes(SHAPES[d.model]) ? 2 : 0);
+    ds.pointBorderWidth.push(stroked ? 2.5 : 0);
   });
 }
 rebuild();
@@ -1464,13 +1597,15 @@ const chart = new Chart(ctx, {
     animation: { duration: 600 },
     scales: {
       x: {
-        min: 59000,
+        min: ''' + str(x_min) + ''',
+        max: ''' + str(int(km_hi)) + ''',
         title: { display: true, text: 'Kilometres', color: '#aaa', font: { size: 14 } },
         ticks: { color: '#888', callback: v => (v/1000).toFixed(0) + 'k' },
         grid: { color: '#2a2a4a' }
       },
       y: {
         min: ''' + str(y_min) + ''',
+        max: ''' + str(int(price_hi)) + ''',
         title: { display: true, text: 'Price (CAD)', color: '#aaa', font: { size: 14 } },
         ticks: { color: '#888', callback: v => '$' + v.toLocaleString() },
         grid: { color: '#2a2a4a' }
@@ -1538,6 +1673,8 @@ document.querySelectorAll('.controls input[data-source]').forEach(cb => {
 def _parse_args():
     import argparse
     p = argparse.ArgumentParser(description="Scrape used SUV listings and update the plot.")
+    p.add_argument("--config", default="camille.yaml",
+                   help="Path to a profile YAML (default: camille.yaml).")
     p.add_argument("--source", choices=["autotrader", "facebook", "all"], default="all",
                    help="Which source(s) to scrape. Default: all")
     p.add_argument("--limit", type=int, default=None,
@@ -1545,7 +1682,8 @@ def _parse_args():
     p.add_argument("--days", type=int, default=None,
                    help="Override daysSinceListed (FB only). Default: computed from last-scrape state, max 365.")
     p.add_argument("--make-model", dest="make_model", default=None,
-                   help="Scrape only one vehicle slug (e.g. 'subaru/forester').")
+                   help="Scrape only one vehicle slug (e.g. 'subaru/forester' or 'toyota'). "
+                        "Must match a make[/model] from the active profile.")
     p.add_argument("--generate-html-only", action="store_true",
                    help="Skip scraping — just regenerate the HTML plot from the existing CSV.")
     p.add_argument("--no-publish", action="store_true",
@@ -1553,11 +1691,10 @@ def _parse_args():
     return p.parse_args()
 
 
-def _scrape_autotrader(vehicles: List[str], scrape_num: int, scrape_time: str) -> None:
-    first = vehicles[0]
-    first_search_url = (
-        f"https://www.autotrader.ca/cars/{first}/qc/montr%c3%a9al/" + COMMON_PARAMS
-    )
+def _scrape_autotrader(units: List[SearchUnit], cfg: Config,
+                       scrape_num: int, scrape_time: str) -> None:
+    first = units[0]
+    first_search_url = build_at_search_url(first, cfg.autotrader_search)
     driver = create_driver(headless=False)
     log("Warming up AutoTrader session...")
     driver.get("https://www.autotrader.ca/")
@@ -1577,43 +1714,48 @@ def _scrape_autotrader(vehicles: List[str], scrape_num: int, scrape_time: str) -
     time.sleep(8)
 
     try:
-        print(f"\n{'='*60}\nScraping AutoTrader: {first}\n{'='*60}")
-        scrape_vehicle(driver, first_search_url, first, OUTPUT_FILE,
-                       scrape_num, scrape_time, first_page_loaded=True)
-        for make_model in vehicles[1:]:
-            search_url = (
-                f"https://www.autotrader.ca/cars/{make_model}/qc/montr%c3%a9al/" + COMMON_PARAMS
-            )
-            print(f"\n{'='*60}\nScraping AutoTrader: {make_model}\n{'='*60}")
-            scrape_vehicle(driver, search_url, make_model, OUTPUT_FILE,
-                           scrape_num, scrape_time)
+        print(f"\n{'='*60}\nScraping AutoTrader: {first.slug}\n{'='*60}")
+        scrape_vehicle(driver, first_search_url, first, cfg.output.csv,
+                       scrape_num, scrape_time,
+                       province_filter=cfg.filters.province,
+                       first_page_loaded=True)
+        for unit in units[1:]:
+            search_url = build_at_search_url(unit, cfg.autotrader_search)
+            print(f"\n{'='*60}\nScraping AutoTrader: {unit.slug}\n{'='*60}")
+            scrape_vehicle(driver, search_url, unit, cfg.output.csv,
+                           scrape_num, scrape_time,
+                           province_filter=cfg.filters.province)
     finally:
         driver.quit()
 
 
-def _scrape_facebook(vehicles: List[str], scrape_num: int, scrape_time: str,
+def _scrape_facebook(cfg: Config, scrape_num: int, scrape_time: str,
                      max_listings: int, days_override: Optional[int] = None) -> None:
     from fb_scraper import (
         create_fb_driver, scrape_vehicle_facebook,
         load_fb_scrape_state, save_fb_scrape_state, reset_card_trace,
     )
+    if not cfg.fb_queries:
+        log("No FB queries configured — skipping Facebook scrape")
+        return
     reset_card_trace()
     # Snapshot the last-scrape timestamp ONCE — so every vehicle in this run
     # uses the same daysSinceListed window (computed from the prior run's end).
     session_last_ts = load_fb_scrape_state().get("last_fb_scrape_timestamp")
+    allowed_provinces = {cfg.filters.province} if cfg.filters.province else None
     driver = create_fb_driver(headless=False)
     try:
-        for make_model in vehicles:
-            cfg = FB_QUERIES.get(make_model)
-            if not cfg:
-                log(f"No FB config for {make_model} — skipping")
-                continue
-            print(f"\n{'='*60}\nScraping Facebook: {make_model} (query={cfg['query']!r})\n{'='*60}")
+        for q in cfg.fb_queries:
+            print(f"\n{'='*60}\nScraping Facebook: query={q.query!r}\n{'='*60}")
             scrape_vehicle_facebook(
-                driver, make_model=make_model, query=cfg["query"],
-                model_regex_src=cfg["regex"], model_canonical=cfg["model_canonical"],
-                output_file=OUTPUT_FILE, scrape_num=scrape_num, scrape_time=scrape_time,
-                max_listings=max_listings, year_range=cfg.get("year_range"),
+                driver, query=q.query,
+                model_regex_src=q.regex, model_canonical=q.model_canonical,
+                make=q.make,
+                output_file=cfg.output.csv, scrape_num=scrape_num, scrape_time=scrape_time,
+                max_listings=max_listings, year_range=q.year_range,
+                max_price=cfg.fb_defaults.price_max,
+                min_price=cfg.fb_defaults.price_min,
+                allowed_provinces=allowed_provinces,
                 session_last_scrape_timestamp=session_last_ts,
                 days_override=days_override,
             )
@@ -1624,6 +1766,17 @@ def _scrape_facebook(vehicles: List[str], scrape_num: int, scrape_time: str,
             pass
     # Persist the run's end time ONCE so the next run's window starts here.
     save_fb_scrape_state({"last_fb_scrape_timestamp": scrape_time})
+
+
+def _filter_units_by_arg(units: List[SearchUnit], slug: str) -> List[SearchUnit]:
+    """Resolve a ``--make-model`` arg against the profile's search units.
+
+    Accepts ``make/model`` (matches a model-specific unit) or just ``make``
+    (matches any unit of that make — make-only or make/model).
+    """
+    if "/" in slug:
+        return [u for u in units if u.slug == slug]
+    return [u for u in units if u.make == slug]
 
 
 def main() -> None:
@@ -1637,54 +1790,68 @@ def main() -> None:
     (``rcs`` offsets) could be processed in a loop if required.
     """
     args = _parse_args()
+    cfg = load_config(args.config)
+
+    global LOG_DIR
+    LOG_DIR = cfg.output.log_dir
 
     log_path = setup_run_log()
     if log_path:
         log(f"Run log: {log_path}")
+    log(f"Loaded profile: {cfg.profile_name} from {args.config}")
 
     if not args.generate_html_only:
         scrape_time = datetime.now().isoformat()
         scrape_num = 1
-        if os.path.exists(OUTPUT_FILE):
+        if os.path.exists(cfg.output.csv):
             try:
-                existing_df = pd.read_csv(OUTPUT_FILE)
+                existing_df = pd.read_csv(cfg.output.csv)
                 if "scrape_number" in existing_df.columns:
                     scrape_num = int(existing_df["scrape_number"].max()) + 1
             except (pd.errors.EmptyDataError, KeyError, ValueError):
                 pass
 
         if args.make_model:
-            if args.make_model not in VEHICLES:
-                log(f"Unknown make-model: {args.make_model}. Valid: {VEHICLES}")
+            units = _filter_units_by_arg(cfg.search_units, args.make_model)
+            if not units:
+                valid = sorted({u.slug for u in cfg.search_units})
+                log(f"--make-model {args.make_model!r} doesn't match any unit in "
+                    f"{args.config}. Valid: {valid}")
                 return
-            vehicles = [args.make_model]
         else:
-            vehicles = list(VEHICLES)
+            units = list(cfg.search_units)
 
-        if args.source in ("autotrader", "all"):
-            _scrape_autotrader(vehicles, scrape_num, scrape_time)
-        if args.source in ("facebook", "all"):
+        if cfg.autotrader_enabled and args.source in ("autotrader", "all"):
+            _scrape_autotrader(units, cfg, scrape_num, scrape_time)
+        if cfg.facebook_enabled and args.source in ("facebook", "all"):
             max_listings = args.limit if args.limit is not None else 200
-            _scrape_facebook(vehicles, scrape_num, scrape_time,
+            _scrape_facebook(cfg, scrape_num, scrape_time,
                              max_listings=max_listings, days_override=args.days)
 
-        removed = collapse_cross_source_duplicates(OUTPUT_FILE)
+        removed = collapse_cross_source_duplicates(cfg.output.csv)
         if removed:
             log(f"Collapsed {removed} cross-source/same-car duplicate(s)")
 
-    generate_scatter_html(OUTPUT_FILE, SCATTER_HTML)
-    log("Scatter plot updated")
+    if os.path.exists(cfg.output.csv):
+        generate_scatter_html(cfg.output.csv, cfg.output.scatter_html, cfg=cfg)
+        log("Scatter plot updated")
+    else:
+        log(f"CSV {cfg.output.csv} does not exist yet — skipping scatter plot generation")
+        return
 
-    if args.no_publish:
+    if args.no_publish or not cfg.github_pages.enabled:
         return
     try:
-        subprocess.run(["git", "add", SCATTER_HTML], check=True, capture_output=True)
+        subprocess.run(["git", "add", cfg.output.scatter_html], check=True, capture_output=True)
         subprocess.run(
-            ["git", "commit", "-m", f"Update {SCATTER_HTML}"],
+            ["git", "commit", "-m", f"Update {cfg.output.scatter_html} ({cfg.profile_name})"],
             check=True, capture_output=True, text=True,
         )
         subprocess.run(["git", "push"], check=True, capture_output=True, text=True)
-        log(f"Pushed to GitHub Pages: {PAGES_URL}")
+        if cfg.html.public_url:
+            log(f"Pushed to GitHub Pages: {cfg.html.public_url}")
+        else:
+            log(f"Pushed {cfg.output.scatter_html} to {cfg.github_pages.repo}")
     except Exception as e:
         log(f"GitHub push failed (non-fatal): {e}")
 
