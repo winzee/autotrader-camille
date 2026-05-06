@@ -253,6 +253,44 @@ function rebuild() {
 }
 rebuild();
 
+// Axis bounds derived from the data we just put on the chart (post-filter).
+// Replaces the Python-side initial bounds so first paint hugs the actually-
+// displayed points instead of the broader IQR-fenced range.
+function computeAxisBounds() {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  Object.values(datasets).forEach(ds => {
+    ds.data.forEach(p => {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    });
+  });
+  if (!isFinite(minX)) return null;
+  const padX = Math.max(1, (maxX - minX) * 0.04);
+  const padY = Math.max(1, (maxY - minY) * 0.04);
+  return {
+    xMin: Math.floor(minX - padX), xMax: Math.ceil(maxX + padX),
+    yMin: Math.floor(minY - padY), yMax: Math.ceil(maxY + padY),
+  };
+}
+const initialBounds = computeAxisBounds() || { xMin: 0, xMax: 1, yMin: 0, yMax: 1 };
+
+function applyAxisBounds(b) {
+  if (!b) return;
+  chart.options.scales.x.min = b.xMin;
+  chart.options.scales.x.max = b.xMax;
+  chart.options.scales.y.min = b.yMin;
+  chart.options.scales.y.max = b.yMax;
+}
+// Single entry point for any filter change: rebuild visible datasets, hug
+// the axes to them, redraw without animation. Sub-frame on the full dataset.
+function refreshChart() {
+  rebuild();
+  applyAxisBounds(computeAxisBounds());
+  chart.update('none');
+}
+
 Chart.register(ChartDataLabels);
 
 let selectedKey = null;
@@ -361,15 +399,15 @@ const chart = new Chart(ctx, {
     animation: { duration: 600 },
     scales: {
       x: {
-        min: 28794,
-        max: 298885,
+        min: initialBounds.xMin,
+        max: initialBounds.xMax,
         title: { display: true, text: 'Kilometres', color: '#aaa', font: { size: 14 } },
         ticks: { color: '#888', callback: v => (v/1000).toFixed(0) + 'k' },
         grid: { color: '#2a2a4a' }
       },
       y: {
-        min: 7147,
-        max: 15301,
+        min: initialBounds.yMin,
+        max: initialBounds.yMax,
         title: { display: true, text: 'Price (CAD)', color: '#aaa', font: { size: 14 } },
         ticks: { color: '#888', callback: v => '$' + v.toLocaleString() },
         grid: { color: '#2a2a4a' }
@@ -453,11 +491,11 @@ function updateDropdownSummary(name) {
 function commitCars() {
   syncAllFromState();
   updateDropdownSummary('cars');
-  rebuild(); chart.update('none');
+  refreshChart();
 }
 function commitSources() {
   updateDropdownSummary('source');
-  rebuild(); chart.update('none');
+  refreshChart();
 }
 
 if (allCb) {
@@ -525,30 +563,6 @@ const SLIDER_FORMATTERS = {
   price: v => '$' + Math.round(v).toLocaleString(),
   mileage: v => Math.round(v / 1000) + 'k km',
 };
-// Rescale x/y to hug currently-visible data with a small pad. Only triggered
-// when the user *releases* a slider, so the axes stay stable mid-drag and
-// snap on commit. Year is included because narrowing year often eliminates
-// the cheapest / most expensive listings, which leaves dead space on the
-// price axis (same logic for mileage when a year cohort skews younger).
-function rescaleAxes() {
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  Object.values(datasets).forEach(ds => {
-    ds.data.forEach(p => {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
-    });
-  });
-  if (!isFinite(minX)) return; // no visible points — leave axes alone
-  const padX = Math.max(1, (maxX - minX) * 0.04);
-  const padY = Math.max(1, (maxY - minY) * 0.04);
-  chart.options.scales.x.min = Math.floor(minX - padX);
-  chart.options.scales.x.max = Math.ceil(maxX + padX);
-  chart.options.scales.y.min = Math.floor(minY - padY);
-  chart.options.scales.y.max = Math.ceil(maxY + padY);
-  chart.update();
-}
 function setupSlider(name) {
   const group = sliderEl(name);
   if (!group) return;
@@ -578,12 +592,10 @@ function setupSlider(name) {
     if (name === 'year') { applied.yearMin = minV; applied.yearMax = maxV; }
     else if (name === 'price') { applied.priceMin = minV; applied.priceMax = maxV; }
     else if (name === 'mileage') { applied.kmMin = minV; applied.kmMax = maxV; }
-    rebuild(); chart.update('none');
+    refreshChart();
   }
   lo.addEventListener('input', refresh);
   hi.addEventListener('input', refresh);
-  lo.addEventListener('change', rescaleAxes);
-  hi.addEventListener('change', rescaleAxes);
   refresh();
 }
 setupSlider('year');
