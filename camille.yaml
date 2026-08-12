@@ -1,5 +1,16 @@
 profile_name: camille
 
+# How many NEW listings to take per source, on each search unit (AutoTrader)
+# or each query (Facebook). This is the ONLY stop knob you should need:
+# everything else in the scrape loops is an anti-runaway safety valve, kept out
+# of this file on purpose. null = take everything the source will serve.
+# Overridable at the command line with --limit (applies to both sources).
+limits:
+  autotrader:
+    max_new_listings: null
+  facebook:
+    max_new_listings: 200
+
 output:
   csv: used_suv_listings.csv
   scatter_html: suv_scatter.html
@@ -9,7 +20,8 @@ html:
   page_title: "Used SUVs — Price vs Kilometres"
   heading: "Camille's SUV Search"
   public_url: "https://winzee.github.io/autotrader-camille/suv_scatter.html"
-  # chart axes auto-scale via 5/95-percentile bounds; uncomment to set hard caps:
+  # Chart axes auto-scale to the plotted points (3xIQR outlier fences, then a
+  # 4% pad). Uncomment either line to clamp the price axis regardless of data:
   # chart_price_max: 15000
   # chart_price_floor: 4000
 
@@ -19,6 +31,41 @@ github_pages:
 
 filters:
   province: QC
+  # Postal-prefix allowlist applied at search-results time, before fetching
+  # detail pages. AT honors prx/loc unreliably and serves dealers from across
+  # Canada — this filter drops them up front. Prefixes are matched by
+  # startswith() on the uppercased, space-stripped postal code.
+  # H = Greater Mtl; J0-J8 = adjacent regions (J9 excluded — Abitibi-
+  # Témiscamingue, e.g. Rouyn-Noranda is too far); G1/G2/G3 = Quebec City;
+  # G5Y/G5Z/G6A/G6P-G6X = Beauce; G8Y/G8Z/G9A/G9C = Mauricie/Trois-Rivières.
+  allowed_postal_prefixes:
+    - H
+    - J0
+    - J1
+    - J2
+    - J3
+    - J4
+    - J5
+    - J6
+    - J7
+    - J8
+    - G1
+    - G2
+    - G3
+    - G5Y
+    - G5Z
+    - G6A
+    - G6P
+    - G6R
+    - G6S
+    - G6T
+    - G6V
+    - G6W
+    - G6X
+    - G8Y
+    - G8Z
+    - G9A
+    - G9C
 
 autotrader:
   enabled: true
@@ -44,6 +91,9 @@ facebook:
     price_min: 6000
     price_max: 15000
     days_since_listed: 90
+    # Delete-sold sweep: re-open only listings with no sign of life in this
+    # many days (feed re-finds count). 0 = re-check everything every run.
+    sweep_recheck_days: 3
   queries:
     - {make: subaru,  query: "subaru forester",  regex: "forester",     model_canonical: Forester,  year_range: [2016, 2099]}
     - {make: subaru,  query: "subaru outback",   regex: "outback",      model_canonical: OUTBACK,   year_range: [2016, 2099]}

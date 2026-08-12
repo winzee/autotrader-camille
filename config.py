@@ -15,8 +15,8 @@ Schema (see ``camille.yaml`` and ``emile.yaml`` for fully-populated examples):
         page_title: <str>
         heading: <str>
         public_url: <str | null>
-        chart_price_max: <int>      # rows above this dropped from chart
-        chart_price_floor: <int>    # min price used for y-axis auto-scaling
+        chart_price_max: <int>      # optional hard ceiling on the price axis
+        chart_price_floor: <int>    # optional hard floor on the price axis
     github_pages:
         enabled: <bool>
         repo: <str>                 # required when enabled is true
@@ -88,6 +88,10 @@ class FbDefaults:
     price_min: int
     price_max: int
     days_since_listed: int
+    # Delete-sold sweep: only re-open listings with no sign of life in this
+    # many days (feed re-finds and past sweep verdicts both count as life).
+    # 0 = re-check every active row on every run.
+    sweep_recheck_days: int = 3
 
 
 @dataclass
@@ -95,9 +99,10 @@ class HtmlConfig:
     page_title: str
     heading: str
     public_url: Optional[str] = None
-    # Optional caps on the auto-derived chart axes. None / omitted => pure
-    # percentile-based auto-scaling (typical case). Set when you want a hard
-    # ceiling/floor regardless of data (e.g. budget cap).
+    # Optional clamps on the price axis, applied on top of the bounds the
+    # chart derives from the plotted points. None / omitted => pure
+    # auto-scaling (typical case). Set when you want a hard ceiling/floor
+    # regardless of data (e.g. budget cap).
     chart_price_max: Optional[int] = None
     chart_price_floor: Optional[int] = None
 
@@ -118,6 +123,27 @@ class GithubPagesConfig:
 @dataclass
 class FiltersConfig:
     province: Optional[str]
+    # Postal-code prefix allowlist applied at search-results time (before
+    # fetching detail pages). Each entry matches by .startswith() on the
+    # uppercased, space-stripped postal code (e.g. "H1X 3J1" → "H1X3J1").
+    # When None or empty, no postal filter is applied.
+    allowed_postal_prefixes: Optional[List[str]] = None
+
+
+@dataclass
+class LimitsConfig:
+    """How many NEW listings to take per source, per search unit / FB query.
+
+    This is the only stop knob a user should ever set. Everything else in the
+    scrape loops (consecutive-reject guards, no-new-page/card detectors, absolute
+    iteration caps) is a runaway safety valve, deliberately kept out of the YAML
+    so a limit the user asked for can never be silently overridden by one they
+    did not — which is exactly what a hardcoded 40-scroll cap did to `--limit`.
+
+    ``None`` means "no cap: take everything the source will serve".
+    """
+    autotrader_max_new_listings: Optional[int] = None
+    facebook_max_new_listings: Optional[int] = None
 
 
 @dataclass
@@ -133,6 +159,23 @@ class Config:
     facebook_enabled: bool
     fb_defaults: FbDefaults
     fb_queries: List[FbQuery]
+    limits: LimitsConfig = field(default_factory=LimitsConfig)
+
+
+def _load_limits(raw: Dict[str, Any]) -> LimitsConfig:
+    """Parse the optional top-level ``limits`` block.
+
+    A missing block, a missing source, or an explicit ``null`` all mean "no cap".
+    """
+    def _one(section: str) -> Optional[int]:
+        block = raw.get(section) or {}
+        value = block.get("max_new_listings")
+        return None if value is None else int(value)
+
+    return LimitsConfig(
+        autotrader_max_new_listings=_one("autotrader"),
+        facebook_max_new_listings=_one("facebook"),
+    )
 
 
 def load_config(path: str) -> Config:
@@ -181,7 +224,13 @@ def load_config(path: str) -> Config:
             enabled=bool(gh.get("enabled", False)),
             repo=gh.get("repo"),
         ),
-        filters=FiltersConfig(province=filt.get("province")),
+        filters=FiltersConfig(
+            province=filt.get("province"),
+            allowed_postal_prefixes=[
+                str(p).upper().replace(" ", "")
+                for p in (filt.get("allowed_postal_prefixes") or [])
+            ] or None,
+        ),
         autotrader_enabled=bool(at.get("enabled", True)),
         autotrader_search=AutotraderSearch(
             year_min=int(at_search["year_min"]),
@@ -197,6 +246,8 @@ def load_config(path: str) -> Config:
             price_min=int(fb["defaults"]["price_min"]),
             price_max=int(fb["defaults"]["price_max"]),
             days_since_listed=int(fb["defaults"]["days_since_listed"]),
+            sweep_recheck_days=int(fb["defaults"].get("sweep_recheck_days", 3)),
         ),
         fb_queries=fb_queries,
+        limits=_load_limits(raw.get("limits") or {}),
     )

@@ -1,5 +1,16 @@
 profile_name: emile
 
+# How many NEW listings to take per source, on each search unit (AutoTrader)
+# or each query (Facebook). This is the ONLY stop knob you should need:
+# everything else in the scrape loops is an anti-runaway safety valve, kept out
+# of this file on purpose. null = take everything the source will serve.
+# Overridable at the command line with --limit (applies to both sources).
+limits:
+  autotrader:
+    max_new_listings: null
+  facebook:
+    max_new_listings: 400
+
 output:
   csv: emile_suv_listings.csv
   scatter_html: emile_scatter.html
@@ -9,7 +20,9 @@ html:
   page_title: "Used AWD $3k–$9k — Émile's Search"
   heading: "Émile's AWD Search"
   public_url: "https://winzee.github.io/autotrader-camille/emile_scatter.html"
-  # chart axes auto-scale via 5/95-percentile bounds (no manual limits needed)
+  # Chart axes auto-scale to the plotted points (3xIQR outlier fences, then a
+  # 4% pad); no manual limits needed. Set chart_price_floor / chart_price_max
+  # here to clamp the price axis regardless of data.
 
 github_pages:
   enabled: true
@@ -17,6 +30,36 @@ github_pages:
 
 filters:
   province: QC
+  # See camille.yaml for the rationale; same prefix list (Emile and Camille
+  # both target the same QC corridor — H, J, plus selected G areas).
+  allowed_postal_prefixes:
+    - H
+    - J0
+    - J1
+    - J2
+    - J3
+    - J4
+    - J5
+    - J6
+    - J7
+    - J8
+    - G1
+    - G2
+    - G3
+    - G5Y
+    - G5Z
+    - G6A
+    - G6P
+    - G6R
+    - G6S
+    - G6T
+    - G6V
+    - G6W
+    - G6X
+    - G8Y
+    - G8Z
+    - G9A
+    - G9C
 
 autotrader:
   enabled: true
@@ -51,6 +94,15 @@ facebook:
     price_min: 3000
     price_max: 9000
     days_since_listed: 90
-  # Generic AWD query; model_canonical: null leaves CSV's `model` blank for FB rows.
+    # Delete-sold sweep: re-open only listings with no sign of life in this
+    # many days (feed re-finds count). 0 = re-check everything every run.
+    sweep_recheck_days: 3
+  # Generic AWD query. Title regex is intentionally permissive (".*"): FB search
+  # already does keyword matching server-side via query="awd", and many real AWD
+  # listings (every Subaru, Infiniti EX/QX, AWD-trim Santa Fe/CX-5, etc.) omit
+  # "AWD" from the title because the make/model is AWD-by-default. A strict
+  # title regex would reject ~22% of real matches (verified 2026-05-07 sample).
+  # make/model are inferred from the title at write-time; the scatter's
+  # profile-makes filter then narrows to Japanese/Korean for plotting.
   queries:
-    - {query: "awd",   regex: "(awd|4wd|4x4|all.?wheel)",  model_canonical: null, year_range: [2007, 2099]}
+    - {query: "awd",   regex: ".*",  model_canonical: null, year_range: [2007, 2099]}

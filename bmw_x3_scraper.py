@@ -12,9 +12,10 @@ scraper started life targeting BMW X3 listings.
 Because autotrader.ca is a client-side JavaScript app, it cannot be scraped
 reliably with ``requests`` alone. The script uses Selenium with
 ``webdriver_manager`` to download a matching ChromeDriver, launches Chrome
-for Testing in headless mode, scrolls search pages to trigger lazy loads,
-collects listing URLs, and visits each detail page to read an in-page
-JavaScript data object.
+for Testing in a visible window (``_scrape_autotrader`` calls
+``create_driver(headless=False)``, so CAPTCHAs can be solved by hand), scrolls
+search pages to trigger lazy loads, collects listing URLs, and visits each
+detail page to read an in-page JavaScript data object.
 
 ==============================================================================
   AutoTrader dual-app architecture (IMPORTANT — read before modifying)
@@ -52,7 +53,6 @@ How the dual path works:
        Tier 1a: ``window.__NEXT_DATA__`` -> ``parse_next_data()``
        Tier 1b: ``window.ngVdpModel``    -> ``parse_ngvdp_model()``
        Tier 2:  BeautifulSoup on embedded ``<script id="__NEXT_DATA__">``
-       Tier 3:  BeautifulSoup on raw HTML (fragmentary fallback)
 
   3. ``main()`` warms up a session (landing page + cookie consent), loads
      the first search URL, logs which app it landed on, and proceeds
@@ -95,15 +95,26 @@ If you revisit this code after a long absence and things break:
   4. AutoTrader may also deploy anti-bot measures. If you hit CAPTCHAs, try
      random delays, rotating user agents, or a residential proxy. The
      ``_collect_page_links`` helper already detects and pauses for manual
-     CAPTCHA resolution when the page returns very few anchors.
+     CAPTCHA resolution when the page returns very few anchors, and reports
+     the event so ``scrape_vehicle`` refuses to infer deletions from a search
+     that may have been served a block page.
 """
 
 # ── Scraper settings ─────────────────────────────────────────────────────
-MAX_LISTINGS = None       # Max listings per vehicle (None = all)
-LISTING_PAUSE_SECS = 5   # Pause between each listing scrape
+# Anti-runaway safety valves for AutoTrader pagination (internal, not in YAML).
+# The fallback path used to break only when a page yielded neither new links NOR
+# any links at all — so a search that kept re-serving the same page (page param
+# ignored past some rank, or the postal filter emptying every page) looped
+# forever. Only reachable when numberOfPages metadata is missing.
+AT_MAX_PAGES_WITHOUT_NEW = 3   # consecutive pages adding no unseen URL
+AT_MAX_PAGES_ABSOLUTE = 200    # hard ceiling, runaway guard only
+AT_MAX_SCROLLS_PER_PAGE = 30   # anti-wedge ceiling on scroll_to_load_all
+LISTING_PAUSE_SECS = 20  # Base pause between each listing scrape (jittered ±5s)
+VEHICLE_PAUSE_SECS = 45  # Pause between vehicle search transitions (captcha trigger point)
 
 import glob
 import json
+import random
 import re
 import sys
 import time
@@ -112,7 +123,7 @@ from datetime import datetime as _dt
 def log(msg: str) -> None:
     print(f"[{_dt.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import subprocess
 import urllib.parse
@@ -182,6 +193,7 @@ from selenium.webdriver.support.ui import WebDriverWait  # type: ignore
 from selenium.webdriver.support import expected_conditions as EC  # type: ignore
 from webdriver_manager.chrome import ChromeDriverManager  # type: ignore
 from selenium.webdriver.chrome.service import Service  # type: ignore
+from selenium.common.exceptions import TimeoutException, WebDriverException  # type: ignore
 
 
 @dataclass
@@ -238,12 +250,13 @@ class VehicleListing:
 
 
 def create_driver(headless: bool = True) -> webdriver.Chrome:
-    """Instantiate a headless Chrome WebDriver using webdriver‑manager.
+    """Instantiate a Chrome WebDriver using webdriver‑manager.
 
     The ``webdriver_manager`` library automatically downloads an appropriate
-    version of ChromeDriver and ensures that Selenium can locate it.  The
-    ``--headless=new`` flag is used with modern versions of Chrome to
-    suppress the GUI; remove it if you need to see the browser window.
+    version of ChromeDriver and ensures that Selenium can locate it.  With
+    ``headless=True`` the ``--headless=new`` flag suppresses the GUI; the
+    AutoTrader path calls this with ``headless=False`` so the window is
+    visible and a CAPTCHA can be solved by hand mid-run.
 
     Returns
     -------
@@ -279,8 +292,9 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
-    # Prevent page loads from hanging indefinitely
-    driver.set_page_load_timeout(30)
+    # Prevent page loads from hanging indefinitely. 90s, not 30: a cold first
+    # load on a memory-starved machine was measured timing out at ~29.4s.
+    driver.set_page_load_timeout(90)
     return driver
 
 
@@ -298,19 +312,32 @@ def scroll_to_load_all(driver: webdriver.Chrome, pause: float = 2.0) -> None:
     pause : float, optional
         How many seconds to wait between scrolls; increase this if your
         connection is slow.  The default is 2 seconds.
+
+    ``AT_MAX_SCROLLS_PER_PAGE`` bounds the loop. A settling page height is a
+    sound end signal on AT (unlike Facebook, where it ends runs early — see
+    CLAUDE.md); the cap only exists so a page that keeps growing forever cannot
+    wedge the run.
     """
     last_height = driver.execute_script("return document.body.scrollHeight")
-    while True:
+    for _ in range(AT_MAX_SCROLLS_PER_PAGE):
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(pause)
         new_height = driver.execute_script("return document.body.scrollHeight")
         if new_height == last_height:
-            break
+            return
         last_height = new_height
+    log(f"  Page still growing after {AT_MAX_SCROLLS_PER_PAGE} scrolls — "
+        f"collecting what has loaded")
 
 
-def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
-    """Collect listing links from the current search results page."""
+def _collect_page_links(driver: webdriver.Chrome) -> Tuple[Set[str], bool]:
+    """Collect listing links from the current search results page.
+
+    Returns ``(links, captcha_hit)``. ``captcha_hit`` is True when the page
+    tripped the CAPTCHA branch below — solved or not. A challenged page cannot
+    testify about which listings still exist, so callers must not read its
+    (empty or partial) result as listings having disappeared.
+    """
     # Attempt to accept cookie consent if present.
     try:
         consent_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Accept')]")
@@ -325,6 +352,7 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
     LISTING_SELECTORS = ["a[href*='/offers/']", "a[href*='/a/']"]
 
     # Wait for listing links to appear (up to 15s), retry on failure
+    captcha_hit = False
     for attempt in range(3):
         try:
             WebDriverWait(driver, 15).until(
@@ -341,6 +369,7 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
                 # Check for CAPTCHA — a blocked page has very few links
                 total_links = len(driver.find_elements(By.TAG_NAME, "a"))
                 if total_links < 20:
+                    captcha_hit = True
                     log("CAPTCHA detected — please solve it in the browser. Waiting up to 2 min...")
                     for _ in range(24):
                         time.sleep(5)
@@ -350,10 +379,10 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
                             break
                     else:
                         log("Timed out waiting for CAPTCHA resolution")
-                        return set()
+                        return set(), captcha_hit
                     break  # CAPTCHA solved — proceed to scroll + collect
                 print(f"  WARNING: no listing links found (page title: {driver.title})")
-                return set()
+                return set(), captcha_hit
     # Scroll to load all results
     scroll_to_load_all(driver)
     # Collect listing links from all known selectors
@@ -364,7 +393,7 @@ def _collect_page_links(driver: webdriver.Chrome) -> Set[str]:
             if href:
                 clean = href.split("?")[0]
                 links.add(clean)
-    return links
+    return links, captcha_hit
 
 
 def _read_search_page_count(driver: webdriver.Chrome) -> Optional[int]:
@@ -386,8 +415,43 @@ def _read_search_page_count(driver: webdriver.Chrome) -> Optional[int]:
     return None
 
 
+def _read_page_listings_locations(driver: webdriver.Chrome) -> Dict[str, str]:
+    """Map each listing URL on the current search page to its dealer postal code.
+
+    Reads ``__NEXT_DATA__.props.pageProps.listings`` (Next.js search page).
+    Returns ``{}`` on Angular sessions or when the array is missing.
+    """
+    try:
+        pairs = driver.execute_script(
+            "try {"
+            "  var L = window.__NEXT_DATA__.props.pageProps.listings;"
+            "  if (!Array.isArray(L)) return [];"
+            "  return L.map(function (l) {"
+            "    return [l && l.url, l && l.location && l.location.zip];"
+            "  });"
+            "} catch (e) { return []; }"
+        )
+        return {url: zip_ for url, zip_ in (pairs or []) if url and zip_}
+    except Exception:
+        return {}
+
+
+def _postal_passes(zip_code: str, prefixes: List[str]) -> bool:
+    """Return True if ``zip_code`` starts with any allowed prefix.
+
+    Both the postal code and the prefixes are uppercased and stripped of
+    spaces before matching, so "H1X 3J1" matches prefix "H".
+    """
+    if not zip_code or not prefixes:
+        return True
+    norm = zip_code.upper().replace(" ", "")
+    return any(norm.startswith(p) for p in prefixes)
+
+
 def get_listing_urls(driver: webdriver.Chrome, search_url: str,
-                     first_page_loaded: bool = False) -> List[str]:
+                     first_page_loaded: bool = False,
+                     postal_prefixes: Optional[List[str]] = None
+                     ) -> Tuple[List[str], bool]:
     """Return all vehicle listing URLs across every page of the search.
 
     AT renders ~20 listings per search-results page regardless of ``rcp=``;
@@ -396,14 +460,54 @@ def get_listing_urls(driver: webdriver.Chrome, search_url: str,
     ``__NEXT_DATA__.props.pageProps.numberOfPages`` after page 1 loads, so we
     know exactly how many pages to fetch (e.g. 11 pages × 20 = 216 listings
     for Émile's Subaru AWD search, rather than just the first 20).
+
+    When ``postal_prefixes`` is provided, listings whose dealer postal code
+    (read from ``pageProps.listings[].location.zip``) doesn't match any
+    prefix are dropped at search time — saving one detail-page fetch per
+    out-of-area URL. AT honors prx/loc unreliably, so without this filter
+    a make-only Émile search returns dealers from across Canada.
+
+    Returns ``(urls, search_healthy)``. ``search_healthy`` is False when a
+    CAPTCHA was hit on any page or the search yielded no link at all — either
+    way the search could not testify about what still exists, so the caller
+    must not infer deletions from it.
     """
     all_links: Set[str] = set()
+    skipped_postal = 0
+    skipped_unlisted = 0
+    seen_in_listings = 0
+    captcha_hit = False
+
+    def _filter_with_listings(page_links: Set[str]) -> Set[str]:
+        nonlocal skipped_postal, seen_in_listings, skipped_unlisted
+        if not postal_prefixes:
+            return page_links
+        loc = _read_page_listings_locations(driver)
+        if not loc:
+            return page_links  # Angular session or missing metadata; keep all
+        kept: Set[str] = set()
+        for url in page_links:
+            zip_code = loc.get(url)
+            if zip_code is None:
+                # Not in pageProps.listings — sponsored/national ad-tier slots
+                # routinely surface cross-country dealers (Ottawa, Abbotsford BC).
+                # Drop them; legit QC listings are always in the listings array.
+                skipped_unlisted += 1
+                continue
+            seen_in_listings += 1
+            if _postal_passes(zip_code, postal_prefixes):
+                kept.add(url)
+            else:
+                skipped_postal += 1
+        return kept
 
     if not first_page_loaded:
         driver.get(search_url)
-    page1_links = _collect_page_links(driver)
-    all_links.update(page1_links)
-    log(f"  Page 1: {len(page1_links)} URLs")
+    page1_links, page1_captcha = _collect_page_links(driver)
+    captcha_hit = captcha_hit or page1_captcha
+    page1_kept = _filter_with_listings(page1_links)
+    all_links.update(page1_kept)
+    log(f"  Page 1: {len(page1_kept)} URLs (of {len(page1_links)})")
 
     total_pages = _read_search_page_count(driver)
     if total_pages:
@@ -412,22 +516,46 @@ def get_listing_urls(driver: webdriver.Chrome, search_url: str,
         log("  No numberOfPages metadata (Angular session?) — paginating until empty")
 
     page = 2
-    while True:
+    pages_without_new = 0
+    while page <= AT_MAX_PAGES_ABSOLUTE:
         # Clean stop: we've reached the reported last page.
         if total_pages and page > total_pages:
             break
         page_url = f"{search_url}&page={page}"
         driver.get(page_url)
-        page_links = _collect_page_links(driver)
-        new_links = page_links - all_links
+        page_links, page_captcha = _collect_page_links(driver)
+        captcha_hit = captcha_hit or page_captcha
+        page_kept = _filter_with_listings(page_links)
+        new_links = page_kept - all_links
         if not new_links:
-            # Either we've passed the last page, or the page errored out.
-            log(f"  Page {page}: 0 new URLs — stopping")
-            break
+            # No unseen URL: past the last page, the page errored, or AT is
+            # re-serving one we already consumed. The old rule also required
+            # page_links to be empty, which never fired in that third case, so
+            # the loop could spin forever.
+            #
+            # FALLBACK for the no-metadata case ONLY. When AT reports a page
+            # count we trust it: the postal filter can empty several consecutive
+            # pages (out-of-province dealers arrive grouped), and bailing there
+            # would silently drop every later page.
+            pages_without_new += 1
+            if total_pages is None and pages_without_new >= AT_MAX_PAGES_WITHOUT_NEW:
+                log(f"  Page {page}: 0 new URLs on "
+                    f"{pages_without_new} consecutive pages — stopping")
+                break
+            page += 1
+            continue
+        pages_without_new = 0
         all_links.update(new_links)
         log(f"  Page {page}: {len(new_links)} new URLs (total: {len(all_links)})")
         page += 1
-    return list(all_links)
+    else:
+        log(f"  Reached the {AT_MAX_PAGES_ABSOLUTE}-page ceiling — stopping")
+    if postal_prefixes and seen_in_listings:
+        log(f"  Postal filter: skipped {skipped_postal} of {seen_in_listings} listings (out-of-area)")
+    if postal_prefixes and skipped_unlisted:
+        log(f"  Postal filter: skipped {skipped_unlisted} unlisted/sponsored URLs (not in pageProps.listings)")
+    search_healthy = not captcha_hit and bool(all_links)
+    return list(all_links), search_healthy
 
 
 def parse_next_data(data: Dict[str, Any]) -> VehicleListing:
@@ -800,9 +928,9 @@ def parse_ngvdp_model(data: Dict[str, Any]) -> VehicleListing:
 #   1b. ngVdpModel      : legacy but complete; covers Angular sessions
 #   2.  BeautifulSoup on embedded <script id="__NEXT_DATA__">
 #                       : salvages Next.js pages when JS didn't hydrate
-#   3.  BeautifulSoup on raw HTML
-#                       : last-ditch for when both JS globals are missing;
-#                         extracts title / mileage / price / seller only.
+#
+# When every tier misses, the caller gets a VehicleListing carrying only the
+# URL — there is no raw-HTML scraping tier.
 # ============================================================================
 
 
@@ -910,21 +1038,42 @@ def deduplicate_listings(listings: List[VehicleListing]) -> List[VehicleListing]
 # ``camille.yaml`` and ``emile.yaml``.
 
 
-def _at_common_params(search: AutotraderSearch) -> str:
-    """Build the AT search query string from the loaded config.
+# Lat/lon for the postal code in the YAML profiles (both use H1X 3J1, the
+# Olympic Stadium area in Montréal). Sourced from the redirect AT performs
+# when you submit H1X 3J1 in the location box. If a profile ever uses a
+# different postal code, add its coords here.
+_POSTAL_LATLON = {
+    "H1X3J1": (45.54811096191406, -73.55992889404307),
+}
 
-    Always includes ``rcp=100`` and ``sts=Used``. Adds ``pricefrom`` only when
-    ``price_min > 0``. Any entries in ``search.extra_params`` are appended
-    verbatim (e.g. ``dtrain=A`` for AWD-only).
+
+def _at_common_params(search: AutotraderSearch) -> str:
+    """Build the AT search query string in AT's own canonical form.
+
+    Earlier we used ``prx=<km>&loc=<postal>``; AT redirected those away the
+    moment we paginated, dumping us into a country-wide search (the URL on
+    page=N became ``/cars/<make>/ot_used?...`` with no location at all). The
+    canonical form ships ``lat``/``lon``/``zipr`` instead — these survive
+    pagination redirects. Use ``size=100`` (UI cap) to cut page count by 5x
+    over the default ``size=20``; ``rcp=100`` was silently ignored.
     """
+    norm_zip = search.postal_code.upper().replace(" ", "")
+    lat_lon = _POSTAL_LATLON.get(norm_zip)
     parts = [
-        "rcp=100",
-        f"yRng={urllib.parse.quote(str(search.year_min) + ',')}",
         f"priceto={search.price_max}",
-        f"prx={search.radius_km}",
-        f"loc={urllib.parse.quote(search.postal_code)}",
-        "sts=Used",
+        f"modelyearfrom={search.year_min}",
+        f"zipr={search.radius_km}",
+        "cy=CA",
+        "ustate=N%2CU",
+        "damaged_listing=exclude",
+        "atype=C",
+        "search_type=C",
+        "sort=standard",
+        "size=100",
     ]
+    if lat_lon is not None:
+        parts.append(f"lat={lat_lon[0]}")
+        parts.append(f"lon={lat_lon[1]}")
     if search.price_min and search.price_min > 0:
         parts.append(f"pricefrom={search.price_min}")
     for key, value in search.extra_params.items():
@@ -935,15 +1084,24 @@ def _at_common_params(search: AutotraderSearch) -> str:
 def build_at_search_url(unit: SearchUnit, search: AutotraderSearch) -> str:
     """Build the AT search URL for a single (make, optional-model) unit.
 
-    Camille's profile uses ``/cars/<make>/<model>/qc/montréal/`` as before;
-    Émile's profile (model omitted) uses ``/cars/<make>/qc/montréal/``.
+    Path template is AT's canonical ``/cars/<make>[/<model>]/reg_qc/cit_montreal/ot_used``
+    — the form AT redirects to once a postal code is submitted. Earlier we used
+    ``/cars/<make>/qc/montréal/`` which AT silently rewrites away the moment
+    you paginate, dropping the location entirely.
+
+    For digit-suffixed models AT requires a hyphen between the letter and the
+    digit in the URL slug (``rav4`` is rejected; ``rav-4`` works). Letter-only
+    hyphenations (``cr-v``, ``hr-v``) work either way; the YAML form is used
+    as-is. Listing URL filtering still accepts both spellings via
+    ``_make_model_url_patterns``.
     """
     if unit.model:
-        path = f"{unit.make}/{unit.model}"
+        model_slug = re.sub(r"([a-z])(\d)", r"\1-\2", unit.model.lower())
+        path = f"{unit.make}/{model_slug}"
     else:
         path = unit.make
     return (
-        f"https://www.autotrader.ca/cars/{path}/qc/montr%c3%a9al/"
+        f"https://www.autotrader.ca/cars/{path}/reg_qc/cit_montreal/ot_used"
         + _at_common_params(search)
     )
 
@@ -987,7 +1145,9 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
                    unit: SearchUnit, output_file: str,
                    scrape_num: int, scrape_time: str,
                    province_filter: Optional[str] = None,
-                   first_page_loaded: bool = False) -> None:
+                   first_page_loaded: bool = False,
+                   postal_prefixes: Optional[List[str]] = None,
+                   max_new_listings: Optional[int] = None) -> None:
     """Scrape listings for a single vehicle search and save to CSV.
 
     Updates ``last_scrape_timestamp`` for listings still present and sets
@@ -997,19 +1157,27 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
     existing_df = None
     if os.path.exists(output_file):
         try:
-            existing_df = pd.read_csv(output_file)
+            existing_df = pd.read_csv(output_file, dtype={"ad_id": str})
         except pd.errors.EmptyDataError:
             existing_df = None
 
     if existing_df is not None and "source" not in existing_df.columns:
         existing_df["source"] = "autotrader"
 
+    # is_deleted holds an ISO timestamp or NaN. pandas types an all-NaN column
+    # as float64, and assigning a string into it is deprecated — cast once here
+    # rather than on every assignment below.
+    if existing_df is not None and "is_deleted" in existing_df.columns:
+        existing_df["is_deleted"] = existing_df["is_deleted"].astype(object)
+
     existing_urls: Set[str] = set()
     if existing_df is not None and "url" in existing_df.columns:
         existing_urls = set(existing_df["url"].dropna())
 
     log("Collecting listing URLs...")
-    urls = get_listing_urls(driver, search_url, first_page_loaded=first_page_loaded)
+    urls, search_healthy = get_listing_urls(
+        driver, search_url, first_page_loaded=first_page_loaded,
+        postal_prefixes=postal_prefixes)
     # Skip Ontario listings
     urls = [u for u in urls if "/ontario/" not in u.lower()]
     # Restrict to URLs that actually belong to this make/model. The page-level
@@ -1025,7 +1193,10 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
     new_urls = [u for u in urls if u not in existing_urls]
     if len(new_urls) < len(urls):
         print(f"Skipping {len(urls) - len(new_urls)} already scraped, {len(new_urls)} new")
-    urls_to_process = new_urls[:MAX_LISTINGS] if MAX_LISTINGS else new_urls
+    urls_to_process = new_urls[:max_new_listings] if max_new_listings else new_urls
+    if max_new_listings and len(new_urls) > max_new_listings:
+        log(f"  Capping at {max_new_listings} of {len(new_urls)} new listings "
+            f"(limits.autotrader.max_new_listings / --limit)")
     log(f"Processing {len(urls_to_process)} new listings...")
     listings: List[VehicleListing] = []
     for idx, url in enumerate(urls_to_process, start=1):
@@ -1040,11 +1211,25 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
             print(f"  Failed: {exc}")
             continue
         if LISTING_PAUSE_SECS and idx < len(urls_to_process):
-            time.sleep(LISTING_PAUSE_SECS)
+            time.sleep(LISTING_PAUSE_SECS + random.uniform(-5, 5))
 
     unique_listings = deduplicate_listings(listings)
     log(f"Keeping {len(unique_listings)} unique new listings after deduplication")
     new_df = pd.DataFrame([asdict(l) for l in unique_listings])
+
+    # Province filter applies to the rows we are ADDING, never to the ones
+    # already stored: the CSV contract is that listings are flagged, not
+    # deleted, and filtering the combined frame would silently drop every
+    # stored row whose province is blank (all FB rows whose city parse failed).
+    # A null province is no opinion, so it is kept — the read-time filter in
+    # generate_scatter_html decides what actually charts.
+    if province_filter and not new_df.empty and "province" in new_df.columns:
+        wrong_province = new_df["province"].notna() & (new_df["province"] != province_filter)
+        dropped = int(wrong_province.sum())
+        if dropped:
+            log(f"Province filter: dropping {dropped} newly-scraped listings "
+                f"outside {province_filter}")
+            new_df = new_df[~wrong_province].reset_index(drop=True)
 
     # Update existing rows for this vehicle type
     if existing_df is not None and not existing_df.empty:
@@ -1068,19 +1253,27 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
                     f"(previously marked deleted)")
                 existing_df.loc[resurrected, "is_deleted"] = None
 
-        # Deletion safeguard. A scrape that returns very few URLs, or
-        # re-discovers only a small fraction of expected listings, is treated
-        # as a partial failure — we refuse to mark anything deleted on those
-        # runs to avoid false positives.
+        # Deletion safeguard, two independent questions:
+        #  1. COULD the search testify? A CAPTCHA or a page that served no link
+        #     at all produces an empty or partial scraped_url_set, and the
+        #     difference against the CSV then reads as disappearance. Size
+        #     checks cannot see this — a blocked search is small, not wrong.
+        #  2. Was the scrape big enough? A scrape that returns very few URLs, or
+        #     re-discovers only a small fraction of expected listings, is treated
+        #     as a partial failure.
         existing_active = int((vehicle_mask & existing_df["is_deleted"].isna()).sum())
         seen_count = int(still_present.sum())
         MIN_URLS_FOR_DELETION = 5
         MIN_HEALTH_RATIO = 0.5
-        healthy_scrape = (
+        big_enough = (
             len(scraped_url_set) >= MIN_URLS_FOR_DELETION
             and (existing_active < 3 or seen_count / existing_active >= MIN_HEALTH_RATIO)
         )
-        if healthy_scrape:
+        if not search_healthy:
+            log("Skipping deletion marking — the search could not testify "
+                "(CAPTCHA hit, or no listing link served at all). "
+                "Resurrections and last_scrape_timestamp updates still applied.")
+        elif big_enough:
             disappeared = (vehicle_mask
                            & ~existing_df["url"].isin(scraped_url_set)
                            & existing_df["is_deleted"].isna())
@@ -1102,9 +1295,6 @@ def scrape_vehicle(driver: webdriver.Chrome, search_url: str,
         combined = new_df if not new_df.empty else pd.DataFrame()
 
     if not combined.empty:
-        if province_filter and "province" in combined.columns:
-            combined = combined[combined["province"] == province_filter]
-
         cols = combined.columns.tolist()
         if "scrape_timestamp" in cols:
             cols.insert(0, cols.pop(cols.index("scrape_timestamp")))
@@ -1131,14 +1321,21 @@ def collapse_cross_source_duplicates(csv_file: str) -> int:
     Only active (``is_deleted`` NaN) rows are considered; deleted rows pass
     through untouched. Returns number of rows dropped.
     """
-    df = pd.read_csv(csv_file)
-    key_cols = ["make", "model", "year", "mileage_km", "price_cad"]
-    eligible = df["is_deleted"].isna() & df[key_cols].notna().all(axis=1)
+    # ad_id as str: float64 rewrites 17-digit ids and loses digits for good.
+    df = pd.read_csv(csv_file, dtype={"ad_id": str})
+    # year + mileage + price alone identify a physical car: two listings sharing
+    # an exact odometer reading at the same price and year are the same vehicle,
+    # not a coincidence. make/model stay in the key but are allowed to be null —
+    # requiring them exempted precisely the rows most likely to be reposts, since
+    # a title like "2009 Pontiac Vibe" yields no make for a Japanese/Korean
+    # profile. That left 5 known duplicates (one BMW posted 3x) in the CSV.
+    strong_cols = ["year", "mileage_km", "price_cad"]
+    eligible = df["is_deleted"].isna() & df[strong_cols].notna().all(axis=1)
     if not eligible.any():
         return 0
     cand = df[eligible].copy()
-    cand["_k_make"] = cand["make"].astype(str).str.lower().str.strip()
-    cand["_k_model"] = cand["model"].astype(str).str.lower().str.strip()
+    cand["_k_make"] = cand["make"].fillna("").astype(str).str.lower().str.strip()
+    cand["_k_model"] = cand["model"].fillna("").astype(str).str.lower().str.strip()
     cand["_k_year"] = cand["year"].astype(int)
     cand["_k_mi"] = cand["mileage_km"].astype(int)
     cand["_k_pr"] = cand["price_cad"].astype(int)
@@ -1152,11 +1349,27 @@ def collapse_cross_source_duplicates(csv_file: str) -> int:
     if removed == 0:
         return 0
 
+    from fb_scraper import _ad_id_str
+
     def _row_url(row: pd.Series) -> str:
-        src = str(row.get("source") or "").lower()
-        if src == "facebook" and pd.notna(row.get("ad_id")):
-            return f"https://www.facebook.com/marketplace/item/{int(row['ad_id'])}/"
-        return str(row.get("url") or "")
+        """Best-effort display URL for the drop log. Never raises.
+
+        This runs after the drop set is computed but before the CSV write, so
+        an exception here loses the whole pass — and legacy rows carry ad_ids
+        as '1588888658875172.0' or '3.56e+16', both of which ``int()`` rejects
+        outright. The stored ``url`` wins whenever it is already an FB item
+        link: past 2**53 the id's trailing digits are genuinely lost, so a URL
+        rebuilt from ``ad_id`` would point at a listing that does not exist,
+        while ``url`` still carries the true id.
+        """
+        url = str(row.get("url") or "")
+        if str(row.get("source") or "").lower() == "facebook":
+            if "/marketplace/item/" in url:
+                return url
+            ad_id = _ad_id_str(row.get("ad_id"))
+            if ad_id.isdigit():
+                return f"https://www.facebook.com/marketplace/item/{ad_id}/"
+        return url
 
     try:
         from fb_scraper import FB_CARD_TRACE_FILE
@@ -1208,7 +1421,7 @@ _SCATTER_SHAPE_POOL = [
 ]
 # Chart.js draws these point styles as stroke-only (no fill). They render at
 # 0px without borderWidth, so we must give every stroked shape a real line
-# weight — otherwise the model's label appears on the chart with no glyph
+# weight — otherwise the point's label appears on the chart with no glyph
 # under it. Filled shapes (circle/rect/rectRounded/rectRot/triangle) are
 # unaffected.
 _SCATTER_LINE_SHAPES = ["star", "cross", "crossRot", "dash", "line"]
@@ -1253,44 +1466,33 @@ def _iqr_fences(series: pd.Series, k: float = 3.0) -> Tuple[float, float]:
     return q1 - k * iqr, q3 + k * iqr
 
 
-def _axis_bounds(series: pd.Series, pad_factor: float = 0.04,
-                 hard_min: Optional[float] = None,
-                 hard_max: Optional[float] = None) -> Tuple[float, float]:
-    """Axis bounds = data range + small padding, optionally clamped.
-
-    Run AFTER outlier filtering so the chart hugs the bulk of the data.
-    """
-    if series.empty:
-        return (float(hard_min) if hard_min is not None else 0.0,
-                float(hard_max) if hard_max is not None else 1.0)
-    lo, hi = float(series.min()), float(series.max())
-    pad = max(hi - lo, 1.0) * pad_factor
-    lo -= pad
-    hi += pad
-    lo = max(lo, 0.0)
-    if hard_min is not None:
-        lo = max(lo, float(hard_min))
-    if hard_max is not None:
-        hi = min(hi, float(hard_max))
-    return lo, hi
-
-
 def generate_scatter_html(csv_file: str, output_file: str,
                           cfg: Optional["Config"] = None) -> None:
     """Read the CSV and generate an interactive scatter plot HTML file.
 
-    Axis bounds and outlier filtering are derived from the data via 5th/95th
-    percentiles (clamped by ``cfg.html.chart_price_max`` / ``chart_price_floor``
-    when set), so each profile gets a chart sized to the bulk of its listings
-    instead of being skewed by damaged-car outliers or 500k-km lemons.
+    Outlier filtering uses Tukey 3×IQR fences on price and mileage, and the
+    axes are then sized in the browser to the points actually displayed (see
+    ``computeAxisBounds`` in the inline JS), so each profile gets a chart sized
+    to the bulk of its listings instead of being skewed by damaged-car outliers
+    or 500k-km lemons. ``cfg.html.chart_price_floor`` / ``chart_price_max``
+    clamp those derived price bounds when set; unset means pure auto-scale.
 
     Models, datasets, and legend checkboxes are also derived from the data —
-    no hardcoded model whitelist.
+    no hardcoded model whitelist. Shape encodes MAKE, colour encodes scrape
+    freshness.
+
+    This is the read-time authority on what charts: the CSV keeps every row
+    ever scraped (flagged, never deleted), and everything filtered out below —
+    deleted rows, other profiles' makes, out-of-province listings, non-cars —
+    stays on disk.
     """
+    from fb_scraper import title_is_non_car
+
     if cfg is None:
         # Loaded directly (e.g. from a one-off script). Default to Camille's profile.
         cfg = load_config("camille.yaml")
-    df = pd.read_csv(csv_file)
+    # ad_id as str: float64 rewrites 17-digit ids and loses digits for good.
+    df = pd.read_csv(csv_file, dtype={"ad_id": str})
     df = df[df["is_deleted"].isna()]
     df = df.dropna(subset=["price_cad", "mileage_km", "model"])
 
@@ -1300,6 +1502,27 @@ def generate_scatter_html(csv_file: str, output_file: str,
     if cfg.filters.province and "province" in df.columns:
         df = df[df["province"] == cfg.filters.province]
 
+    # Motorcycles and powersports share FB's Vehicles category with cars and
+    # carry a mileage and a year, so only the title tells them apart. The
+    # scrape-time filter can't reach rows collected before it existed; apply it
+    # again here so they leave the chart without leaving the CSV.
+    # Call ``title_is_non_car``, never ``_FB_NON_CAR_TITLE_RX``: a second,
+    # make-scoped pattern holds the tokens that are real car names on their own
+    # (Rebel, Shadow, a bare GSX), and only the helper reads both. It also
+    # absorbs NaN titles, so the column maps as-is.
+    if "title" in df.columns:
+        non_car = df["title"].map(title_is_non_car)
+        if non_car.any():
+            log(f"Excluding {int(non_car.sum())} non-car listings (motorcycle / "
+                f"powersport titles) from the chart")
+            df = df[~non_car]
+
+    # Model casing varies by source ("SANTA FE" vs "Santa Fe", "CR-V" vs
+    # "Cr-v"), which used to split one model across two datasets, two legend
+    # entries and two shapes. Normalise once, here, so every downstream use
+    # — datasets, legend, shape assignment, datalabels — shares one key.
+    df["model"] = df["model"].astype(str).str.strip().str.upper()
+
     # Drop only *extreme* outliers (3×IQR — broken-car $5 listings, $32k
     # over-budget cars that slipped past the URL filter, etc.). Real
     # budget-end deals stay in.
@@ -1308,21 +1531,12 @@ def generate_scatter_html(csv_file: str, output_file: str,
     df = df[(df["price_cad"] >= price_fence_lo) & (df["price_cad"] <= price_fence_hi)
             & (df["mileage_km"] >= km_fence_lo) & (df["mileage_km"] <= km_fence_hi)]
 
-    # Axis bounds hug the surviving data range (no wasted whitespace),
-    # honouring optional hard caps from the YAML if set.
-    price_lo, price_hi = _axis_bounds(
-        df["price_cad"],
-        hard_min=cfg.html.chart_price_floor,
-        hard_max=cfg.html.chart_price_max,
-    )
-    km_lo, km_hi = _axis_bounds(df["mileage_km"])
-
     # Freshness tiers: "latest" (last scrape), "recent" (today/yesterday), "old"
     scrape_nums = df["scrape_number"].dropna().unique()
     max_scrape = df["scrape_number"].max() if len(scrape_nums) else 0
     has_multiple = len(scrape_nums) > 1
     today = datetime.now().date()
-    yesterday = today - __import__("datetime").timedelta(days=1)
+    yesterday = today - timedelta(days=1)
 
     records = []
     for _, row in df.iterrows():
@@ -1369,22 +1583,29 @@ def generate_scatter_html(csv_file: str, output_file: str,
             "model_version": row["model_version"] if pd.notna(row.get("model_version")) else "",
         })
 
-    # Per-model dataset metadata, ordered by frequency so the most common
-    # models get the most distinctive shapes.
+    # Per-model datasets, ordered by frequency so the most common models sit
+    # at the top of each make's list in the dropdown.
     model_counts = df["model"].value_counts() if not df.empty else pd.Series(dtype=int)
     model_order = list(model_counts.index)
-    model_shapes = {m: _SCATTER_SHAPE_POOL[i % len(_SCATTER_SHAPE_POOL)]
-                    for i, m in enumerate(model_order)}
+    model_to_make = {m: str(df.loc[df["model"] == m, "make"].iloc[0])
+                     for m in model_order}
+
+    # Shape encodes MAKE, not model. Émile's profile alone reaches ~150
+    # distinct models against a 10-glyph pool, so a per-model shape repeats
+    # roughly 15 times over and tells the reader nothing; the ~13 makes fit the
+    # pool almost exactly. Datasets stay per-model (the legend and the
+    # datalabels still name the model) — only the glyph is shared.
+    make_order = list(df["make"].value_counts().index) if not df.empty else []
+    make_shapes = {mk: _SCATTER_SHAPE_POOL[i % len(_SCATTER_SHAPE_POOL)]
+                   for i, mk in enumerate(make_order)}
+    model_shapes = {m: make_shapes.get(model_to_make[m], _SCATTER_SHAPE_POOL[0])
+                    for m in model_order}
 
     # Hierarchical make → models for the Cars dropdown. Makes ordered
-    # alphabetically; models within a make ordered by overall frequency
-    # (preserves the shape-assignment ranking so the most common stays
-    # at the top).
+    # alphabetically; models within a make ordered by overall frequency.
     makes_to_models: Dict[str, List[str]] = {}
-    if not df.empty:
-        for m in model_order:
-            mk = str(df.loc[df["model"] == m, "make"].iloc[0])
-            makes_to_models.setdefault(mk, []).append(m)
+    for m in model_order:
+        makes_to_models.setdefault(model_to_make[m], []).append(m)
     makes_sorted = sorted(makes_to_models.keys())
 
     # Slider bounds — derived from the post-IQR-fence data so the sliders
@@ -1444,10 +1665,13 @@ def generate_scatter_html(csv_file: str, output_file: str,
 
     shapes_js = json.dumps(model_shapes, ensure_ascii=False)
     line_shapes_js = json.dumps(_SCATTER_LINE_SHAPES)
+    # Optional hard clamps on the price axis. The axes are computed in the
+    # browser (they follow the user's filters), so the knobs have to travel
+    # there — computing them in Python left them with nothing to affect.
+    price_floor_js = json.dumps(cfg.html.chart_price_floor)
+    price_max_js = json.dumps(cfg.html.chart_price_max)
 
     json_data = json.dumps(records, ensure_ascii=False)
-    x_min = int(km_lo)
-    y_min = int(price_lo)
 
     page_title_html = (cfg.html.page_title or "")\
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -1621,6 +1845,10 @@ def generate_scatter_html(csv_file: str, output_file: str,
 const SHAPES = ''' + shapes_js + ''';
 const LINE_SHAPES = new Set(''' + line_shapes_js + ''');
 const isLineShape = (model) => LINE_SHAPES.has(SHAPES[model]);
+// html.chart_price_floor / html.chart_price_max from the profile YAML.
+// null = no clamp, i.e. pure auto-scale.
+const PRICE_FLOOR = ''' + price_floor_js + ''';
+const PRICE_MAX = ''' + price_max_js + ''';
 const COLORS = { latest: '#ffd700', recent: '#2ecc71', old: '#7f8c8d' };
 const SIZES  = { latest: { r: 7, hr: 9, bw: 0 }, recent: { r: 7, hr: 9, bw: 0 }, old: { r: 7, hr: 9, bw: 0 } };
 const SOURCE_LABELS = { autotrader: 'AutoTrader', facebook: 'Facebook' };
@@ -1687,9 +1915,9 @@ function rebuild() {
 }
 rebuild();
 
-// Axis bounds derived from the data we just put on the chart (post-filter).
-// Replaces the Python-side initial bounds so first paint hugs the actually-
-// displayed points instead of the broader IQR-fenced range.
+// Axis bounds derived from the data we just put on the chart (post-filter),
+// so the view hugs the actually-displayed points rather than the broader
+// IQR-fenced range. PRICE_FLOOR / PRICE_MAX clamp the price axis on top.
 function computeAxisBounds() {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   Object.values(datasets).forEach(ds => {
@@ -1703,9 +1931,13 @@ function computeAxisBounds() {
   if (!isFinite(minX)) return null;
   const padX = Math.max(1, (maxX - minX) * 0.04);
   const padY = Math.max(1, (maxY - minY) * 0.04);
+  let yMin = Math.floor(minY - padY), yMax = Math.ceil(maxY + padY);
+  if (PRICE_FLOOR !== null) yMin = Math.max(yMin, PRICE_FLOOR);
+  if (PRICE_MAX !== null) yMax = Math.min(yMax, PRICE_MAX);
+  if (yMax <= yMin) yMax = yMin + 1;
   return {
     xMin: Math.floor(minX - padX), xMax: Math.ceil(maxX + padX),
-    yMin: Math.floor(minY - padY), yMax: Math.ceil(maxY + padY),
+    yMin: yMin, yMax: yMax,
   };
 }
 const initialBounds = computeAxisBounds() || { xMin: 0, xMax: 1, yMin: 0, yMax: 1 };
@@ -2047,32 +2279,136 @@ setupSlider('mileage');
 
 def _parse_args():
     import argparse
-    p = argparse.ArgumentParser(description="Scrape used SUV listings and update the plot.")
+    p = argparse.ArgumentParser(
+        description="Scrape used-vehicle listings and update the scatter plot.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+HOW LIMITS WORK
+---------------
+A "listing" counted by --limit is a NEW one: anything already in the profile's
+CSV is skipped for free and does NOT count toward the limit. So re-running does
+not re-collect the same cars — it picks up where the last run stopped.
+
+The limit applies PER SEARCH UNIT, not per run:
+  AutoTrader  once per make/model in autotrader.search_units
+  Facebook    once per entry in facebook.queries
+With 13 AutoTrader makes, --limit 50 therefore allows up to 650 new listings.
+
+Defaults live in the profile YAML and differ per source:
+
+  limits:
+    autotrader: {max_new_listings: null}   # null = take everything served
+    facebook:   {max_new_listings: 400}
+
+--limit overrides BOTH sources for this run. Omit it to use the profile.
+
+SOLD LISTINGS
+-------------
+Every Facebook scrape first re-opens EVERY active Facebook listing already in
+the CSV, one at a time, and retires the ones that are sold or expired. Nothing
+is sampled: measured at 13.3s per listing end to end, so ~680 stored listings
+need about 2.5 HOURS before the scrape itself starts. Progress is saved to disk
+every 20 listings, so an interrupted pass keeps what it already checked.
+Use --no-delete-sold to skip it.
+
+Retired rows are flagged (is_deleted), never removed — they leave the chart but
+stay in the CSV. AutoTrader needs no such pass: re-scanning its search results
+already retires listings that vanished.
+
+A run can still stop before reaching the limit — that is normal, and means the
+source ran out of matching listings. The scrapers also carry internal
+anti-runaway valves (consecutive-reject and no-new-page/card detectors, absolute
+iteration ceilings). Those are not tunable and are sized so they never cut a run
+short before the limit you asked for. See "Stop conditions" in CLAUDE.md.
+
+COST
+----
+Each new listing costs a detail page fetch: ~5s on Facebook, ~20s on AutoTrader
+(plus 45s between AutoTrader makes). --limit is the main lever on run time.
+
+EXAMPLES
+--------
+  %(prog)s --config emile.yaml                      # both sources, profile limits
+  %(prog)s --config emile.yaml --source facebook    # Facebook only
+  %(prog)s --config emile.yaml --limit 25           # quick test run
+  %(prog)s --config emile.yaml --days 30            # widen the FB window
+  %(prog)s --config emile.yaml --generate-html-only # rebuild the plot, no scrape
+""")
     p.add_argument("--config", default="camille.yaml",
                    help="Path to a profile YAML (default: camille.yaml).")
     p.add_argument("--source", choices=["autotrader", "facebook", "all"], default="all",
-                   help="Which source(s) to scrape. Default: all")
-    p.add_argument("--limit", type=int, default=None,
-                   help="Max listings per vehicle (applied to FB; useful for testing).")
-    p.add_argument("--days", type=int, default=None,
-                   help="Override daysSinceListed (FB only). Default: computed from last-scrape state, max 365.")
+                   help="Which source(s) to scrape (default: all). AutoTrader runs "
+                        "first and is the slow half — use 'facebook' to skip it.")
+    p.add_argument("--limit", type=int, default=None, metavar="N",
+                   help="Cap NEW listings at N per search unit (AutoTrader) and per "
+                        "query (Facebook). Already-scraped listings are skipped and "
+                        "do not count. Overrides limits.<source>.max_new_listings for "
+                        "both sources; omit to use the profile. See notes below.")
+    p.add_argument("--days", type=int, default=None, metavar="D",
+                   help="Facebook only: only consider ads posted in the last D days. "
+                        "By default this is derived from the last run (time since it, "
+                        "plus 2 days of overlap), so a small window after a recent "
+                        "scrape is expected. Widen it to backfill older ads.")
     p.add_argument("--make-model", dest="make_model", default=None,
                    help="Scrape only one vehicle slug (e.g. 'subaru/forester' or 'toyota'). "
                         "Must match a make[/model] from the active profile.")
     p.add_argument("--generate-html-only", action="store_true",
                    help="Skip scraping — just regenerate the HTML plot from the existing CSV.")
+    p.add_argument("--full-delete-sweep", dest="full_delete_sweep", action="store_true",
+                   help="Force the sold-listing pass to re-open EVERY active FB listing, "
+                        "ignoring facebook.defaults.sweep_recheck_days.")
+    p.add_argument("--no-delete-sold", dest="no_delete_sold", action="store_true",
+                   help="Skip the sold-listing pass. By default, every Facebook scrape "
+                        "is followed by a pass that re-opens each active FB listing with "
+                        "no sign of life in sweep_recheck_days and retires "
+                        "the ones that are sold or expired (~13s each). "
+                        "AutoTrader needs "
+                        "no such pass — its search re-scan already retires vanished "
+                        "listings.")
+    p.add_argument("--keep-browser", dest="keep_browser", action="store_true",
+                   help="Leave the Chrome window open when the Facebook run ends, so "
+                        "you can inspect the last page. The window keeps fb_profile/ "
+                        "locked, so close it before the next run.")
     p.add_argument("--no-publish", action="store_true",
                    help="Do not commit/push the HTML to GitHub Pages.")
     return p.parse_args()
 
 
+def _at_get_with_retry(driver, url: str, attempts: int = 3,
+                       wait_secs: int = 30) -> bool:
+    """driver.get with retries; True on success, False when all attempts fail.
+
+    A memory-starved machine makes renderer timeouts routine (measured
+    2026-08-11: the cold warm-up load died at the 30s page-load timeout and
+    took the whole run with it). Waiting between attempts gives the box time
+    to page Chrome back in.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            driver.get(url)
+            return True
+        except (TimeoutException, WebDriverException) as exc:
+            log(f"Navigation to {url} failed (attempt {attempt}/{attempts}, "
+                f"{type(exc).__name__})")
+            if attempt < attempts:
+                time.sleep(wait_secs)
+    return False
+
+
 def _scrape_autotrader(units: List[SearchUnit], cfg: Config,
-                       scrape_num: int, scrape_time: str) -> None:
+                       scrape_num: int, scrape_time: str, max_new_listings: Optional[int] = None) -> None:
     first = units[0]
     first_search_url = build_at_search_url(first, cfg.autotrader_search)
     driver = create_driver(headless=False)
     log("Warming up AutoTrader session...")
-    driver.get("https://www.autotrader.ca/")
+    if not _at_get_with_retry(driver, "https://www.autotrader.ca/"):
+        log("AutoTrader unreachable after retries — skipping the AutoTrader pass "
+            "(no rows touched; the deletion guard treats this as no-testimony)")
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        return
     time.sleep(5)
     try:
         consent_btn = WebDriverWait(driver, 5).until(
@@ -2085,30 +2421,86 @@ def _scrape_autotrader(units: List[SearchUnit], cfg: Config,
         time.sleep(1)
     except Exception:
         pass
-    driver.get(first_search_url)
-    time.sleep(8)
+    first_page_loaded = _at_get_with_retry(driver, first_search_url)
+    if first_page_loaded:
+        time.sleep(8)
 
+    postal_prefixes = cfg.filters.allowed_postal_prefixes
     try:
-        print(f"\n{'='*60}\nScraping AutoTrader: {first.slug}\n{'='*60}")
-        scrape_vehicle(driver, first_search_url, first, cfg.output.csv,
-                       scrape_num, scrape_time,
-                       province_filter=cfg.filters.province,
-                       first_page_loaded=True)
-        for unit in units[1:]:
-            search_url = build_at_search_url(unit, cfg.autotrader_search)
+        for idx, unit in enumerate(units):
+            if idx > 0:
+                log(f"Pausing {VEHICLE_PAUSE_SECS}s between vehicle searches...")
+                time.sleep(VEHICLE_PAUSE_SECS)
+            search_url = (first_search_url if idx == 0
+                          else build_at_search_url(unit, cfg.autotrader_search))
             print(f"\n{'='*60}\nScraping AutoTrader: {unit.slug}\n{'='*60}")
-            scrape_vehicle(driver, search_url, unit, cfg.output.csv,
-                           scrape_num, scrape_time,
-                           province_filter=cfg.filters.province)
+            try:
+                scrape_vehicle(driver, search_url, unit, cfg.output.csv,
+                               scrape_num, scrape_time,
+                               province_filter=cfg.filters.province,
+                               first_page_loaded=(idx == 0 and first_page_loaded),
+                               postal_prefixes=postal_prefixes,
+                               max_new_listings=max_new_listings)
+            except (TimeoutException, WebDriverException) as exc:
+                # One flaky page must cost one make, never the run. The unit's
+                # deletion marking either ran on a healthy collection or never
+                # ran at all, so no rows are falsely flagged by bailing here.
+                log(f"Unit '{unit.slug}' failed ({type(exc).__name__}: "
+                    f"{str(exc).splitlines()[0][:160]}) — recreating the driver "
+                    "and moving to the next make")
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+                try:
+                    driver = create_driver(headless=False)
+                    if not _at_get_with_retry(driver, "https://www.autotrader.ca/"):
+                        log("Driver recreated but AutoTrader unreachable — "
+                            "aborting the AutoTrader pass")
+                        return
+                    time.sleep(5)
+                except Exception as exc2:
+                    log(f"Driver recreation failed ({type(exc2).__name__}) — "
+                        "aborting the AutoTrader pass")
+                    return
     finally:
-        driver.quit()
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+_FB_TRACE_CARD_LINE_RX = re.compile(r"^\[\d{2}:\d{2}:\d{2}\] ")
+
+
+def _fb_cards_traced() -> int:
+    """Count per-card lines written to the FB card trace so far.
+
+    ``scrape_vehicle_facebook`` returns nothing, so this is how the caller
+    learns whether the feed actually served cards: every card the scraper
+    evaluates gets one ``[HH:MM:SS] TAG | ...`` line, kept or rejected.
+    Section headers and the file banner don't match. Returns 0 when the file
+    can't be read — an unreadable trace must not be mistaken for a scrape that
+    produced results.
+    """
+    try:
+        from fb_scraper import FB_CARD_TRACE_FILE
+        with open(FB_CARD_TRACE_FILE, "r") as f:
+            return sum(1 for line in f if _FB_TRACE_CARD_LINE_RX.match(line))
+    except Exception:
+        return 0
 
 
 def _scrape_facebook(cfg: Config, scrape_num: int, scrape_time: str,
-                     max_listings: int, days_override: Optional[int] = None) -> None:
+                     max_listings: Optional[int],
+                     days_override: Optional[int] = None,
+                     delete_sold: bool = True,
+                     full_sweep: bool = False,
+                     keep_browser: bool = False) -> None:
     from fb_scraper import (
         create_fb_driver, scrape_vehicle_facebook,
         load_fb_scrape_state, save_fb_scrape_state, reset_card_trace,
+        delete_sold_listings,
     )
     if not cfg.fb_queries:
         log("No FB queries configured — skipping Facebook scrape")
@@ -2122,10 +2514,16 @@ def _scrape_facebook(cfg: Config, scrape_num: int, scrape_time: str,
     # uses the same daysSinceListed window (computed from the prior run's end).
     session_last_ts = load_fb_scrape_state(state_path).get("last_fb_scrape_timestamp")
     allowed_provinces = {cfg.filters.province} if cfg.filters.province else None
+    # Did the feed serve anything at all this run? Advancing the stored
+    # timestamp after a run that saw zero cards narrows the next run's
+    # daysSinceListed window for a scrape that never happened, and the loss
+    # compounds silently across runs.
+    saw_any_card = False
     driver = create_fb_driver(headless=False)
     try:
         for q in cfg.fb_queries:
             print(f"\n{'='*60}\nScraping Facebook: query={q.query!r}\n{'='*60}")
+            cards_before = _fb_cards_traced()
             scrape_vehicle_facebook(
                 driver, query=q.query,
                 model_regex_src=q.regex, model_canonical=q.model_canonical,
@@ -2139,207 +2537,51 @@ def _scrape_facebook(cfg: Config, scrape_num: int, scrape_time: str,
                 session_last_scrape_timestamp=session_last_ts,
                 days_override=days_override,
             )
+            cards_seen = _fb_cards_traced() - cards_before
+            if cards_seen > 0:
+                saw_any_card = True
+            else:
+                log(f"  Query {q.query!r} saw no card at all")
+        # Sweep AFTER scraping, on purpose: the scroll pass stamps
+        # last_scrape_timestamp on every row it re-finds in the feed, and each
+        # of those stamps is a free proof of life the sweep can skip. Skipping
+        # can only DELAY a flag (the row is re-checked within
+        # sweep_recheck_days), never create a false one.
+        if delete_sold:
+            from fb_scraper import FB_POST_SWEEP_COOLDOWN_SECS
+            log(f"Cooling down {FB_POST_SWEEP_COOLDOWN_SECS}s between the search "
+                f"feed and the delete-sold sweep")
+            time.sleep(FB_POST_SWEEP_COOLDOWN_SECS)
+            recheck_days = 0 if full_sweep else cfg.fb_defaults.sweep_recheck_days
+            if full_sweep:
+                log("--full-delete-sweep: re-checking every active FB listing regardless "
+                    "of recent signs of life")
+            delete_sold_listings(driver, cfg.output.csv, scrape_time,
+                                 stale_after_days=recheck_days)
     finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
-    # Persist the run's end time ONCE so the next run's window starts here.
-    save_fb_scrape_state({"last_fb_scrape_timestamp": scrape_time}, state_path)
-
-
-# Makes whose relevant lineup is essentially all-AWD, so cross-import doesn't
-# require an explicit AWD keyword in the listing text. Subaru sells the BRZ as
-# RWD but it's a coupe — won't appear in any of our SUV/used-AWD searches.
-_AWD_BY_DEFAULT_MAKES = {"Subaru"}
-_AWD_KEYWORD_RE = re.compile(r"awd|4wd|4x4|all.?wheel", re.IGNORECASE)
-_MODEL_NORMALIZE_RE = re.compile(r"[\s\-]+")
-
-
-def _normalize_model(s: object) -> str:
-    if s is None:
-        return ""
-    return _MODEL_NORMALIZE_RE.sub("", str(s).strip().lower())
-
-
-def _row_matches_scrape_params(row: pd.Series, cfg: Config) -> bool:
-    """True if a CSV row from another profile satisfies our scrape filters.
-
-    Filters: province, year_min, price range, make+model coverage by our
-    search_units, and (if our profile sets ``extra_params.dtrain == 'A'``) an
-    AWD signal — either the make is in ``_AWD_BY_DEFAULT_MAKES`` or one of
-    title / description / model_version / safety_equipment / comfort_equipment
-    contains an AWD keyword.
-    """
-    if cfg.filters.province:
-        if str(row.get("province", "") or "").strip() != cfg.filters.province:
-            return False
-
-    try:
-        year = int(row["year"])
-    except (TypeError, ValueError, KeyError):
-        return False
-    if year < cfg.autotrader_search.year_min:
-        return False
-
-    try:
-        price = float(row["price_cad"])
-    except (TypeError, ValueError, KeyError):
-        return False
-    if price < cfg.autotrader_search.price_min or price > cfg.autotrader_search.price_max:
-        return False
-
-    row_make = str(row.get("make", "") or "").strip()
-    if not row_make:
-        return False
-    row_model_n = _normalize_model(row.get("model"))
-    matched = False
-    for u in cfg.search_units:
-        if u.make.capitalize() != row_make:
-            continue
-        if u.model is None:
-            matched = True
-            break
-        if row_model_n and _normalize_model(u.model) == row_model_n:
-            matched = True
-            break
-    if not matched:
-        return False
-
-    if cfg.autotrader_search.extra_params.get("dtrain") == "A":
-        if row_make not in _AWD_BY_DEFAULT_MAKES:
-            blob = " ".join(
-                str(row.get(f, "") or "")
-                for f in ("title", "description", "model_version",
-                          "safety_equipment", "comfort_equipment")
-            )
-            if not _AWD_KEYWORD_RE.search(blob):
-                return False
-
-    return True
-
-
-def _discover_other_profiles(current_cfg_path: str, current_profile_name: str
-                             ) -> List[Tuple[str, Config]]:
-    """Return ``(yaml_path, Config)`` tuples for every parseable profile in
-    cwd whose ``profile_name`` differs from ours."""
-    out: List[Tuple[str, Config]] = []
-    current_abs = os.path.abspath(current_cfg_path)
-    for path in sorted(glob.glob("*.yaml")):
-        if os.path.abspath(path) == current_abs:
-            continue
-        try:
-            other = load_config(path)
-        except Exception as e:
-            log(f"Cross-import: skipping {path} (load error: {e})")
-            continue
-        if other.profile_name == current_profile_name:
-            continue
-        out.append((path, other))
-    return out
-
-
-def _cross_profile_import(cfg: Config, args_config: str,
-                          scrape_num: int, scrape_time: str) -> int:
-    """Import rows from other profiles' CSVs that match our scrape parameters.
-
-    Saves AT detail-page (and FB) queries for listings already parsed by another
-    profile — the goal is fewer outbound requests and a smaller anti-bot
-    footprint. Imported rows preserve the source profile's
-    ``last_scrape_timestamp`` so the resurrection / deletion logic continues to
-    behave correctly. Rows already in our CSV (matched by ``url``, with
-    ``ad_id`` as a secondary key for FB rows) are skipped.
-
-    Runs BEFORE the AT/FB scrapes so the in-progress scrape sees the imported
-    rows and can refresh them via the URL-already-known fast path.
-    """
-    others = _discover_other_profiles(args_config, cfg.profile_name)
-    if not others:
-        return 0
-
-    if os.path.exists(cfg.output.csv):
-        try:
-            target = pd.read_csv(cfg.output.csv)
-        except pd.errors.EmptyDataError:
-            target = pd.DataFrame()
+        if keep_browser:
+            # Leave Chrome up so the run can be inspected afterwards. Also drop
+            # the atexit teardown, which would otherwise close it on exit.
+            import atexit
+            from fb_scraper import _quit_quietly
+            try:
+                atexit.unregister(_quit_quietly)
+            except Exception:
+                pass
+            log("Browser left open (--keep-browser). NOTE: it holds fb_profile/, "
+                "so the next run cannot start until you close this Chrome window.")
+        else:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+    # Persist the run's end time ONCE so the next run's window starts here —
+    # but only if this run actually observed the feed.
+    if saw_any_card:
+        save_fb_scrape_state({"last_fb_scrape_timestamp": scrape_time}, state_path)
     else:
-        target = pd.DataFrame()
-
-    seen_urls: Set[str] = (
-        set(target["url"].dropna().astype(str)) if "url" in target.columns else set()
-    )
-    seen_ad_ids: Set[str] = (
-        set(target["ad_id"].dropna().astype(str)) if "ad_id" in target.columns else set()
-    )
-
-    imported_frames: List[pd.DataFrame] = []
-    for path, other_cfg in others:
-        if not os.path.exists(other_cfg.output.csv):
-            log(f"Cross-import: {other_cfg.profile_name} has no CSV yet — skipping")
-            continue
-        try:
-            src = pd.read_csv(other_cfg.output.csv)
-        except pd.errors.EmptyDataError:
-            continue
-
-        # Skip rows the source has already marked deleted.
-        if "is_deleted" in src.columns:
-            src = src[src["is_deleted"].isna()]
-        if src.empty:
-            continue
-
-        keep_mask = src.apply(lambda r: _row_matches_scrape_params(r, cfg), axis=1)
-        candidates = src[keep_mask]
-
-        # Drop ones already in our CSV (by url, with ad_id as secondary key).
-        if "url" in candidates.columns and seen_urls:
-            candidates = candidates[~candidates["url"].astype(str).isin(seen_urls)]
-        if "ad_id" in candidates.columns and seen_ad_ids:
-            ad_id_str = candidates["ad_id"].astype(str)
-            candidates = candidates[
-                candidates["ad_id"].isna() | ~ad_id_str.isin(seen_ad_ids)
-            ]
-
-        if candidates.empty:
-            log(f"Cross-import: {other_cfg.profile_name} → {cfg.profile_name}: "
-                f"0 new rows after filter")
-            continue
-
-        # Tag with our run identifiers; preserve last_scrape_timestamp from source.
-        copy = candidates.copy()
-        copy["scrape_number"] = scrape_num
-        copy["scrape_timestamp"] = scrape_time
-
-        imported_frames.append(copy)
-        if "url" in copy.columns:
-            seen_urls.update(copy["url"].dropna().astype(str))
-        if "ad_id" in copy.columns:
-            seen_ad_ids.update(copy["ad_id"].dropna().astype(str))
-
-        by_source = (
-            copy["source"].value_counts().to_dict() if "source" in copy.columns else {}
-        )
-        log(f"Cross-import: {other_cfg.profile_name} → {cfg.profile_name}: "
-            f"{len(copy)} new rows ({by_source})")
-
-    if not imported_frames:
-        return 0
-
-    new_rows = pd.concat(imported_frames, ignore_index=True)
-    if not target.empty:
-        for c in target.columns:
-            if c not in new_rows.columns:
-                new_rows[c] = pd.NA
-        for c in new_rows.columns:
-            if c not in target.columns:
-                target[c] = pd.NA
-        combined = pd.concat([target, new_rows[target.columns]], ignore_index=True)
-    else:
-        combined = new_rows
-
-    combined.to_csv(cfg.output.csv, index=False)
-    log(f"Cross-import: total {len(new_rows)} rows merged into {cfg.output.csv}")
-    return len(new_rows)
+        log("No Facebook query returned a single card — leaving the last-scrape "
+            "timestamp untouched so the next run keeps the same lookback window")
 
 
 def _filter_units_by_arg(units: List[SearchUnit], slug: str) -> List[SearchUnit]:
@@ -2354,14 +2596,15 @@ def _filter_units_by_arg(units: List[SearchUnit], slug: str) -> List[SearchUnit]
 
 
 def main() -> None:
-    """Scrape all configured vehicles, one at a time.
+    """Scrape every search unit of the active profile, one at a time.
 
-    The search URL is assembled with filters for make (BMW), model (X3), year
-    range (2021–2023), vehicle condition (Used), radius (500 km) and postal
-    code (H1X 3J1).  The ``rcp`` parameter is set to 100 to request the
-    maximum number of results per page, as suggested by the AutoTrader
-    scraping documentation【298376264705576†L224-L233】.  Additional pages
-    (``rcs`` offsets) could be processed in a loop if required.
+    Each AutoTrader search URL is assembled by ``build_at_search_url`` from the
+    profile's ``autotrader.search`` block (year_min, price range, radius_km,
+    postal_code, plus any ``extra_params``); pagination happens via ``&page=N``
+    in ``get_listing_urls``, which reads the page count from ``__NEXT_DATA__``.
+    Facebook then runs from ``facebook.queries``. The scatter HTML is
+    regenerated at the end of every run and pushed to GitHub Pages unless
+    ``--no-publish`` is passed.
     """
     args = _parse_args()
     cfg = load_config(args.config)
@@ -2374,21 +2617,36 @@ def main() -> None:
         log(f"Run log: {log_path}")
     log(f"Loaded profile: {cfg.profile_name} from {args.config}")
 
+    # Forensics for the 2026-08-11 mystery kills: two runs died mid-sweep on an
+    # awake machine with no user action. Log the PID so system logs can be
+    # searched for it, and log any catchable termination signal. If the run
+    # dies with no "RECEIVED SIGNAL" line in the log, the killer used SIGKILL.
+    import signal as _signal
+    log(f"PID {os.getpid()} (parent {os.getppid()})")
+
+    def _log_termination(signum, frame):
+        try:
+            name = _signal.Signals(signum).name
+        except ValueError:
+            name = str(signum)
+        log(f"RECEIVED SIGNAL {name} — terminating")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        raise SystemExit(128 + signum)
+
+    for _sig in (_signal.SIGTERM, _signal.SIGINT, _signal.SIGHUP, _signal.SIGQUIT):
+        _signal.signal(_sig, _log_termination)
+
     if not args.generate_html_only:
         scrape_time = datetime.now().isoformat()
         scrape_num = 1
         if os.path.exists(cfg.output.csv):
             try:
-                existing_df = pd.read_csv(cfg.output.csv)
+                existing_df = pd.read_csv(cfg.output.csv, dtype={"ad_id": str})
                 if "scrape_number" in existing_df.columns:
                     scrape_num = int(existing_df["scrape_number"].max()) + 1
             except (pd.errors.EmptyDataError, KeyError, ValueError):
                 pass
-
-        # Pull in already-parsed listings from sibling profiles before scraping —
-        # rows that match our scrape parameters arrive without spending a
-        # detail-page request on AT or a card hydration on FB.
-        _cross_profile_import(cfg, args.config, scrape_num, scrape_time)
 
         if args.make_model:
             units = _filter_units_by_arg(cfg.search_units, args.make_model)
@@ -2400,12 +2658,20 @@ def main() -> None:
         else:
             units = list(cfg.search_units)
 
+        # --limit overrides the per-source YAML budget for BOTH sources.
+        at_limit = (args.limit if args.limit is not None
+                    else cfg.limits.autotrader_max_new_listings)
+        fb_limit = (args.limit if args.limit is not None
+                    else cfg.limits.facebook_max_new_listings)
         if cfg.autotrader_enabled and args.source in ("autotrader", "all"):
-            _scrape_autotrader(units, cfg, scrape_num, scrape_time)
+            _scrape_autotrader(units, cfg, scrape_num, scrape_time,
+                               max_new_listings=at_limit)
         if cfg.facebook_enabled and args.source in ("facebook", "all"):
-            max_listings = args.limit if args.limit is not None else 200
             _scrape_facebook(cfg, scrape_num, scrape_time,
-                             max_listings=max_listings, days_override=args.days)
+                             max_listings=fb_limit, days_override=args.days,
+                             delete_sold=not args.no_delete_sold,
+                             full_sweep=args.full_delete_sweep,
+                             keep_browser=args.keep_browser)
 
         removed = collapse_cross_source_duplicates(cfg.output.csv)
         if removed:
