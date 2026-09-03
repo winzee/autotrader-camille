@@ -9,7 +9,7 @@ limits:
   autotrader:
     max_new_listings: null
   facebook:
-    max_new_listings: 400
+    max_new_listings: null
 
 output:
   csv: emile_suv_listings.csv
